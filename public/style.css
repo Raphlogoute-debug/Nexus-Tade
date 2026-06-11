@@ -368,3 +368,13 @@ tr.res-row.selected td { background: #1a2334; }
 .fleet-chip .mode-toggle.auto { color: var(--green); border-color: var(--green); }
 
 #spark { display: block; margin: 4px 0; }
+
+select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 5px;
+  max-width: 170px;
+}

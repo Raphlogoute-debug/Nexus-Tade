@@ -17,7 +17,11 @@ import { BIOMES } from '../data/biomes.js';
 import { initPlayer, getPlayer, getShip, getCargo, tierOf } from '../server/player/state.js';
 import { previewTrade, executeTrade } from '../server/player/trade.js';
 import { previewTravel, startTravel } from '../server/player/travel.js';
-import { getConcession, collectConcession } from '../server/player/concession.js';
+import {
+  listConcessions, collectConcession, depositToConcession, buyConcession, installWorkshop,
+} from '../server/player/concession.js';
+import { researchTech } from '../server/player/tech.js';
+import { RECIPES as ALL_RECIPES } from '../data/recipes.js';
 import { generateFactions } from '../server/factions/generate.js';
 import { initTraders } from '../server/npc/traders.js';
 import { tickContracts, deliverContract } from '../server/factions/contracts.js';
@@ -172,12 +176,12 @@ console.log('\n■ Phase 2 — scénario joueur\n');
 
 const ship = getShip(db);
 const home = db.prepare('SELECT * FROM planets WHERE id = ?').get(ship.planet_id);
-const concession = getConcession(db);
+const concession = listConcessions(db)[0];
 
 check(tierOf(home.population) === 1,
   `départ sur ${home.name} (${BIOMES[home.biome].label.toLowerCase()}, ${Math.round(home.population)} M hab.) — tier 1, ouvert à tous`);
-check(concession.planet_id === home.id && concession.stockpile > 0,
-  `concession de ${RESOURCES[concession.resource_id].name} : entrepôt à ${concession.stockpile.toFixed(0)} après ${TICKS} ticks (+${concession.rate}/tick)`);
+check(concession.planet_id === home.id && concession.used > 0,
+  `concession de ${RESOURCES[concession.resource_id].name} : entrepôt à ${concession.used.toFixed(0)} après ${TICKS} ticks (+${concession.rate}/tick)`);
 
 // Chargement puis vente locale : crédits, prestige et impact prix.
 const before = {
@@ -541,13 +545,13 @@ check(['war', 'conquest', 'peace', 'seizure'].every((t) => eventTypes.has(t) || 
 
 console.log('\n■ Phase 5 — flotte, automatisation, catalogue étendu\n');
 
-// Catalogue étendu : 23 ressources, marchés présents partout.
-check(Object.keys(RESOURCES).length === 23,
-  `${Object.keys(RESOURCES).length} ressources au catalogue (6+4 brutes, 5+3 intermédiaires, 3+2 finies)`);
+// Catalogue étendu : 26 ressources, marchés présents partout.
+check(Object.keys(RESOURCES).length === 26,
+  `${Object.keys(RESOURCES).length} ressources au catalogue (10 brutes, 10 intermédiaires, 6 finies)`);
 const marketsPerPlanet = db.prepare(
   'SELECT MIN(n) AS mn FROM (SELECT COUNT(*) AS n FROM planet_resources GROUP BY planet_id)'
 ).get().mn;
-check(marketsPerPlanet === 23, 'chaque planète a un marché pour chacune des 23 ressources');
+check(marketsPerPlanet === 26, 'chaque planète a un marché pour chacune des 26 ressources');
 
 // Migration : une planète amputée de ses nouvelles ressources les retrouve.
 db.prepare(
@@ -555,7 +559,7 @@ db.prepare(
 ).run();
 const restored = ensureResourceRows(db);
 check(restored === 3 && db.prepare(
-  'SELECT COUNT(*) AS n FROM planet_resources WHERE planet_id = 1').get().n === 23,
+  'SELECT COUNT(*) AS n FROM planet_resources WHERE planet_id = 1').get().n === 26,
   `migration des sauvegardes : ${restored} marchés manquants recréés (production biome, conso population)`);
 
 // Achat de vaisseau au chantier d'un monde tier 2+.
@@ -581,8 +585,94 @@ check(fleetEvents > 0,
 check(autoShip.fuel <= autoShip.fuel_capacity && autoShip.fuel > 0,
   'le capitaine automatique gère son carburant (plein au marché local)');
 
+// ══ Phase 6 : industrie joueur ═══════════════════════════════════
+
+console.log('\n■ Phase 6 — technologies, ateliers, concessions multiples\n');
+
+db.prepare('UPDATE player SET credits = 500000 WHERE id = 1').run();
+const flagship = getShip(db);
+const homeFacility = listConcessions(db)[0];
+db.prepare('UPDATE ships SET planet_id = ?, mode = ? WHERE id = ?')
+  .run(homeFacility.planet_id, 'manual', flagship.id);
+
+// Site de test propre : concession basculée sur du minerai de fer et
+// entrepôt vidé (après ~100 ticks il débordait de la ressource du biome).
+db.prepare("UPDATE concessions SET resource_id = 'iron_ore' WHERE id = ?").run(homeFacility.id);
+db.prepare('DELETE FROM facility_storage WHERE concession_id = ?').run(homeFacility.id);
+
+// L'arbre se respecte : pas de Manufacture sans Microélectronique.
+const blocked = researchTech(db, 'manufacturing');
+check(!blocked.ok && blocked.error.includes('prérequis'),
+  `prérequis d'arbre respectés : « ${blocked.error} »`);
+
+// Pas d'atelier sans la filière.
+const noTech = installWorkshop(db, homeFacility.id, 'steel');
+check(!noTech.ok, `atelier refusé sans recherche : « ${noTech.error} »`);
+
+// Métallurgie → fonderie sur site : le filet de minerai devient de l'acier.
+researchTech(db, 'smelting');
+const steelShop = installWorkshop(db, homeFacility.id, 'steel');
+check(steelShop.ok, `Métallurgie recherchée, fonderie installée (−${steelShop.cost} cr)`);
+for (let i = 0; i < 6; i++) runTick(db);
+const steelMade = listConcessions(db)[0].storage.find((s) => s.resource_id === 'steel');
+check(Boolean(steelMade) && steelMade.quantity > 0,
+  `transformation sur site : ${steelMade?.quantity.toFixed(0)} aciers produits depuis le minerai extrait`);
+
+// Livrer des entrées achetées ailleurs : cuivre déposé → alliages.
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'copper_ore', 120, 8)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 120, avg_cost = 8`
+).run(flagship.id);
+const deposit = depositToConcession(db, 'copper_ore', 120, flagship.id);
+installWorkshop(db, homeFacility.id, 'alloys');
+for (let i = 0; i < 5; i++) runTick(db);
+const alloysMade = listConcessions(db)[0].storage.find((s) => s.resource_id === 'alloys');
+check(deposit.ok && Boolean(alloysMade) && alloysMade.quantity > 0,
+  `chaîne alimentée par le commerce : 120 cuivres déposés → ${alloysMade?.quantity.toFixed(0)} alliages (fer local + cuivre importé)`);
+
+const loaded = collectConcession(db, undefined, flagship.id, 'alloys');
+check(loaded.ok && loaded.moved > 0,
+  `${loaded.moved} alliages chargés en soute (coût nul → futur profit pur)`);
+
+// Forage profond : extraction ×1.5.
+const rateBefore = listConcessions(db)[0].rate;
+researchTech(db, 'deep_mining');
+const rateAfter = listConcessions(db)[0].rate;
+check(Math.abs(rateAfter - rateBefore * CONFIG.PLAYER.FACILITIES.DEEP_MINING_MULT) < 0.01,
+  `Forage profond : extraction ${rateBefore} → ${rateAfter}/tick`);
+
+// Prospection → deuxième concession sur un autre monde.
+researchTech(db, 'prospection');
+const elsewhere = db.prepare(
+  'SELECT id FROM planets WHERE id != ? ORDER BY id LIMIT 1').get(homeFacility.planet_id);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(elsewhere.id, flagship.id);
+const second = buyConcession(db, flagship.id);
+check(second.ok && listConcessions(db).length === 2,
+  second.ok && `2e concession sur ${second.planetName} (${second.resourceName}, ${second.price} cr)`);
+
+// La chaîne profonde : hélium-3 + cristaux → antimatière (tier quantique).
+for (const t of ['chemistry', 'microelectronics', 'manufacturing', 'precision', 'quantum_industry']) {
+  researchTech(db, t);
+}
+const qShop = installWorkshop(db, second.id, 'antimatter');
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'helium3', 90, 18)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 90, avg_cost = 18`
+).run(flagship.id);
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'energy_crystals', 60, 14)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 60, avg_cost = 14`
+).run(flagship.id);
+depositToConcession(db, 'helium3', 90, flagship.id);
+depositToConcession(db, 'energy_crystals', 60, flagship.id);
+for (let i = 0; i < 5; i++) runTick(db);
+const antimatterMade = listConcessions(db).find((c) => c.id === second.id)
+  .storage.find((s) => s.resource_id === 'antimatter');
+check(qShop.ok && Boolean(antimatterMade) && antimatterMade.quantity > 0,
+  `industrie quantique : ${antimatterMade?.quantity.toFixed(0)} antimatière synthétisée sur site (−${qShop.cost} cr d'atelier)`);
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 5 vérifiées : économie, commerce, factions, guerres, flotte et automatisation OK\n');
+  : '\n✓ Phases 1 à 6 vérifiées : économie, commerce, factions, guerres, flotte et industrie joueur OK\n');
 process.exit(failures ? 1 : 0);

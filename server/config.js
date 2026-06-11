@@ -35,6 +35,8 @@ export const CONFIG = {
       meds: 0.03,
       luxury_goods: 0.012,
       adv_components: 0.008, // infrastructures
+      antimatter: 0.004,     // réacteurs des grands mondes
+      jump_drives: 0.002,    // flottes civiles haut de gamme
     },
 
     // Production brute par tick = poids du biome × (BASE + COEF × √pop_M).
@@ -86,6 +88,17 @@ export const CONFIG = {
       { rate: 60, cap: 4000, cost: 8000 },
       { rate: 150, cap: 10000, cost: 30000 },
     ],
+
+    // Industrie joueur (Phase 6) : ateliers de transformation sur site.
+    FACILITIES: {
+      WORKSHOP_RATE: 4,        // runs de recette par tick et par atelier
+      WORKSHOP_COST: { intermediate: 6000, finished: 15000 },
+      WORKSHOP_COST_OVERRIDE: { antimatter: 30000, quantum_chips: 30000, jump_drives: 50000 },
+      CONCESSION_BASE_PRICE: 25000, // 2e concession ; double à chaque suivante
+      MAX_CONCESSIONS: 5,
+      DEEP_MINING_MULT: 1.5,   // tech Forage profond
+      WAREHOUSE_TECH_MULT: 2,  // tech Entrepôts automatisés
+    },
 
     // Prestige : 1 point par tranche de profit réalisé, bonus par nouveau
     // partenaire commercial (première transaction avec une planète).

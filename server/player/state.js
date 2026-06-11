@@ -90,7 +90,7 @@ export function initPlayer(db) {
        VALUES (?, ?, ?, ?, ?, ?, 'manual', 'freighter')`
     ).run(PL.SHIP.NAME, home.id, PL.SHIP.CARGO, PL.SHIP.FUEL_CAP, PL.SHIP.FUEL_CAP, PL.SHIP.SPEED);
     db.prepare(
-      'INSERT INTO concession (id, planet_id, resource_id, level, stockpile) VALUES (1, ?, ?, 1, 0)'
+      'INSERT INTO concessions (planet_id, resource_id, level) VALUES (?, ?, 1)'
     ).run(home.id, resourceId);
 
     recordFullSnapshot(db, home.id, tick);

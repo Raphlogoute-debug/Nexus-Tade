@@ -4,14 +4,15 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 5 terminée** — vous n'êtes plus un marchand mais une
-compagnie : flotte jusqu'à 8 vaisseaux (3 classes aux chantiers civils des
-mondes T2+), capitaines automatiques qui commercent pour vous avec VOS
-règles (tiers, licences, listes noires) et rapportent prestige et crédits,
-catalogue étendu à 23 ressources (silicium, métaux précieux, hélium-3,
-épices, polymères, céramiques, médicaments, biens de luxe, composants
-avancés), et graphes de prix dans le panneau de marché. Les royaumes de la
-Phase 4 continuent de vivre et de se battre autour de vous.
+**État actuel : Phase 6 terminée** — vous êtes un industriel : arbre de
+10 technologies (filières de transformation + effets permanents), ateliers
+installés sur vos concessions qui transforment sur site (le filet de
+minerai devient acier, alliages… jusqu'à l'antimatière et aux moteurs à
+saut), entrepôts multi-ressources alimentés par l'extraction locale ET vos
+livraisons, concessions multiples (jusqu'à 5 mondes via Prospection), et
+26 ressources au catalogue. Avec la flotte automatisée de la Phase 5 et
+les guerres de la Phase 4, la boucle complète est là : extraire,
+transformer, transporter, vendre — et exploiter les conflits.
 
 ## Lancer
 
@@ -156,6 +157,26 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 - **Graphes de prix** : sparkline des 60 derniers ticks dans le formulaire
   d'ordre (l'historique servait déjà l'API)
 
+**Phase 6 — l'industrie joueur** (`server/player/tech.js`, `concession.js`)
+- **Arbre technologique** (`data/technologies.js`) : 10 recherches en
+  crédits — 7 filières d'atelier (Métallurgie → … → Industrie quantique,
+  avec prérequis) et 3 effets permanents (Forage profond +50 %
+  d'extraction, Entrepôts ×2, Prospection planétaire)
+- **Ateliers sur site** : chaque concession a un entrepôt multi-ressources
+  borné ; l'extraction y entre, les ateliers y transforment (cadence fixe,
+  loi du minimum sur les entrées ET la place), le joueur charge/décharge
+  sa soute — acheter du cuivre ailleurs pour nourrir sa fonderie
+  d'alliages, et revendre à coût d'acquisition nul (profit pur → prestige)
+- **Concessions multiples** : jusqu'à 5 sites (prix doublant), chacun
+  extrayant la ressource phare de son biome — un site à hélium-3 sur une
+  géante gazeuse alimente votre usine d'antimatière
+- **Chaînes profondes** : antimatière (hélium-3 + cristaux), puces
+  quantiques (silicium + métaux précieux), moteurs à saut (480 cr/u) —
+  consommés par les grands mondes, produits par les seuls industriels
+  équipés
+- Migration douce : l'ancienne concession unique devient le premier site,
+  entrepôt compris
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - Carte canvas : territoires de faction (halos), capitales (losanges),
   brouillard de connaissance (opacité par fraîcheur), vaisseau et ligne de
@@ -188,6 +209,9 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `GET /api/contracts` · `POST /api/contracts/:id/deliver` | appels d'offres de faction et livraison |
 | `GET /api/events?since=id` | fil d'événements du monde (guerres, conquêtes, saisies, flotte) |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
+| `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |
+| `POST /api/concession/collect` · `/deposit` · `/upgrade` | transferts entrepôt↔soute, amélioration |
+| `POST /api/concessions/buy` · `POST /api/concessions/:id/workshops` | nouveau site, installation d'atelier |
 | `POST /api/admin/regenerate` | nouvel univers + nouvelle partie (dev) |
 
 Toutes les commandes de vaisseau acceptent un `shipId` (défaut :
@@ -236,16 +260,16 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
 - **L'information est une ressource** : les prix lointains sont vieux,
   incomplets ou payants.
 
-## Reste à faire (Phase 6+) — cap sur l'économie et le joueur
+## Reste à faire (Phase 7+) — cap sur l'économie et le joueur
 
-- **Profondeur économique** : événements de marché (booms, krachs,
-  épidémies → demande de médicaments), contrats à terme et spéculation,
-  assurances de cargaison
-- **Concession et industrie joueur** : arbre technologique, transformation
-  sur site (fonderie, raffinerie), posséder des parts d'industries
-  planétaires, nouvelles concessions sur d'autres mondes
-- **Encore des ressources** : chaînes plus profondes (antimatière,
-  composants quantiques), ressources exotiques rares par biome
+- **Routes logistiques de flotte** : assigner un vaisseau à une navette
+  régulière entre vos concessions (livrer les entrées, écouler les
+  sorties) — l'usine tourne sans vous
+- **Parts d'industries planétaires** : investir dans les industries des
+  autres mondes et toucher des dividendes
+- **Encore des chaînes** : ressources exotiques rares par biome, recettes
+  alternatives (rendements différents selon la filière)
 - Contrebande (franchir blocus et listes noires), prêts de guerre
 - État de simulation en mémoire + sauvegarde différée (le tick disque
-  approche 600 ms sur les grosses parties) ; SSE à la place du polling
+  approche 600 ms sur les grosses parties) ; SSE à la place du polling ;
+  événements économiques (repoussés à la demande du joueur)

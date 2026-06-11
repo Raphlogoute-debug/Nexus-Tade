@@ -20,7 +20,11 @@ import {
 import { buyShip, setShipMode } from '../player/shipyard.js';
 import { previewTrade, executeTrade, refuel, buyLicence } from '../player/trade.js';
 import { previewTravel, startTravel } from '../player/travel.js';
-import { getConcession, collectConcession, upgradeConcession } from '../player/concession.js';
+import {
+  listConcessions, collectConcession, depositToConcession, upgradeConcession,
+  buyConcession, installWorkshop,
+} from '../player/concession.js';
+import { techCatalog, researchTech, unlockedRecipes } from '../player/tech.js';
 import {
   knownMarket, knowledgeSummary, intelCost, recordIntel, systemDistance,
 } from '../player/knowledge.js';
@@ -206,7 +210,11 @@ export function createApiRouter(db, clock) {
       cargo: getCargo(db, s.id).map((c) => ({ ...c, name: RESOURCES[c.resource_id].name })),
       cargoUsed: cargoUsed(db, s.id),
     }));
-    const concession = getConcession(db);
+    const concessions = listConcessions(db).map((c) => ({
+      ...c,
+      resourceName: RESOURCES[c.resource_id].name,
+      planetName: db.prepare('SELECT name FROM planets WHERE id = ?').get(c.planet_id).name,
+    }));
 
     const tiers = {};
     for (const [tier, t] of Object.entries(CONFIG.PLAYER.TIERS)) {
@@ -227,14 +235,34 @@ export function createApiRouter(db, clock) {
       ship: ships[0], // compatibilité : le vaisseau-amiral
       shipClasses: CONFIG.SHIPS.CLASSES,
       maxFleet: CONFIG.SHIPS.MAX_FLEET,
-      concession: concession && {
-        ...concession,
-        resourceName: RESOURCES[concession.resource_id].name,
-        planetName: db.prepare('SELECT name FROM planets WHERE id = ?')
-          .get(concession.planet_id).name,
-      },
+      concessions,
+      nextConcessionPrice: CONFIG.PLAYER.FACILITIES.CONCESSION_BASE_PRICE
+        * 2 ** Math.max(0, concessions.length - 1),
+      maxConcessions: CONFIG.PLAYER.FACILITIES.MAX_CONCESSIONS,
+      // Ateliers installables (selon les filières recherchées).
+      workshopCatalog: (() => {
+        const unlocked = unlockedRecipes(db);
+        const FAC = CONFIG.PLAYER.FACILITIES;
+        return Object.keys(RECIPES).map((rid) => ({
+          recipe_id: rid,
+          name: RESOURCES[rid].name,
+          cost: FAC.WORKSHOP_COST_OVERRIDE[rid] ?? FAC.WORKSHOP_COST[RESOURCES[rid].tier],
+          unlocked: unlocked.has(rid),
+        }));
+      })(),
       tradePartners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
     });
+  });
+
+  // ── Technologies ───────────────────────────────────────────────
+  router.get('/tech', (req, res) => {
+    res.json(techCatalog(db));
+  });
+
+  router.post('/tech/research', (req, res) => {
+    const techId = req.body?.techId;
+    if (typeof techId !== 'string') return res.status(400).json({ error: 'techId requis' });
+    answer(res, researchTech(db, techId));
   });
 
   // ── Flotte : achat et automatisation ───────────────────────────
@@ -310,16 +338,44 @@ export function createApiRouter(db, clock) {
     answer(res, startTravel(db, planetId, getCurrentTick(db), shipId));
   });
 
-  // ── Concession ─────────────────────────────────────────────────
+  // ── Concessions & ateliers ─────────────────────────────────────
   router.post('/concession/collect', (req, res) => {
     const quantity = req.body?.quantity === undefined ? undefined : parseQty(req.body.quantity);
     const shipId = parseShipId(req.body?.shipId);
+    const resourceId = req.body?.resourceId; // optionnel
     if (quantity === null || shipId === null) return res.status(400).json({ error: 'paramètres invalides' });
-    answer(res, collectConcession(db, quantity, shipId));
+    answer(res, collectConcession(db, quantity, shipId, resourceId));
+  });
+
+  router.post('/concession/deposit', (req, res) => {
+    const quantity = req.body?.quantity === undefined ? undefined : parseQty(req.body.quantity);
+    const shipId = parseShipId(req.body?.shipId);
+    const resourceId = req.body?.resourceId;
+    if (quantity === null || shipId === null || typeof resourceId !== 'string') {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, depositToConcession(db, resourceId, quantity, shipId));
   });
 
   router.post('/concession/upgrade', (req, res) => {
-    answer(res, upgradeConcession(db));
+    const concessionId = req.body?.concessionId;
+    if (!Number.isInteger(concessionId)) return res.status(400).json({ error: 'concessionId requis' });
+    answer(res, upgradeConcession(db, concessionId));
+  });
+
+  router.post('/concessions/buy', (req, res) => {
+    const shipId = parseShipId(req.body?.shipId);
+    if (shipId === null) return res.status(400).json({ error: 'shipId invalide' });
+    answer(res, buyConcession(db, shipId));
+  });
+
+  router.post('/concessions/:id/workshops', (req, res) => {
+    const id = parseId(req.params.id);
+    const recipeId = req.body?.recipeId;
+    if (id === null || typeof recipeId !== 'string') {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, installWorkshop(db, id, recipeId));
   });
 
   // ── Renseignement ──────────────────────────────────────────────

@@ -509,21 +509,68 @@ function renderDockedPanel(planet, market) {
       Sélectionnez un vaisseau amarré ici pour commercer.</div>`;
   }
 
-  // Concession (si c'est ici qu'elle se trouve)
-  const c = state.player.concession;
-  if (c && c.planet_id === planet.id) {
-    const pct = Math.round((c.stockpile / c.cap) * 100);
+  // Industrie : votre concession sur cette planète (ou son achat).
+  const c = state.player.concessions.find((x) => x.planet_id === planet.id);
+  if (c) {
+    const pct = Math.round((c.used / c.cap) * 100);
     html += `
-      <div class="section-label">Concession — ${c.resourceName} (niv. ${c.level})</div>
+      <div class="section-label">Concession — extraction ${c.resourceName} (niv. ${c.level})</div>
       <div class="info-block">
         <div class="row"><span>Extraction</span><span>+${fmtNum.format(c.rate)}/tick</span></div>
-        <div class="row"><span>Entrepôt</span><span>${fmtQty(c.stockpile)} / ${fmtQty(c.cap)} (${pct} %)</span></div>
+        <div class="row"><span>Entrepôt</span><span>${fmtQty(c.used)} / ${fmtQty(c.cap)} (${pct} %)</span></div>
         <div class="gauge"><div style="width:${pct}%"></div></div>
-        ${shipHere ? '<button class="action-btn" id="btn-collect">Charger la soute</button>' : ''}
+    `;
+    for (const s of c.storage) {
+      html += `<div class="row"><span>${s.name}</span>
+        <span>${fmtQty(s.quantity)}
+        ${shipHere ? `<button class="action-btn collect-btn" data-res="${s.resource_id}">→ soute</button>` : ''}
+        </span></div>`;
+    }
+    const shipCargo = selectedShip()?.cargo ?? [];
+    if (shipHere && shipCargo.length > 0) {
+      html += `<div class="row" style="margin-top:6px"><span>Déposer</span><span>
+        <select id="deposit-res">${shipCargo.map((x) =>
+          `<option value="${x.resource_id}">${x.name} (${fmtQty(x.quantity)})</option>`).join('')}</select>
+        <button class="action-btn" id="btn-deposit">→ entrepôt</button></span></div>`;
+    }
+    html += `
         ${c.nextLevelCost !== null
-          ? `<button class="action-btn" id="btn-upgrade">Améliorer (${fmtInt.format(c.nextLevelCost)} cr)</button>`
+          ? `<button class="action-btn" id="btn-upgrade" data-cid="${c.id}">Améliorer (${fmtInt.format(c.nextLevelCost)} cr)</button>`
           : '<span class="badge">niveau max</span>'}
       </div>
+    `;
+
+    // Ateliers : installés, puis installables selon vos technologies.
+    html += `<div class="section-label">Ateliers (×${c.workshops.length})</div>`;
+    for (const w of c.workshops) {
+      const inputs = Object.entries(w.inputs)
+        .map(([rid, q]) => `${q} ${state.player.workshopCatalog.find((x) => x.recipe_id === rid)?.name ?? rid}`)
+        .join(' + ');
+      html += `<div class="industry">${w.name}
+        <span class="io">— ${inputs} → ${w.output} (×${w.rate}/tick)</span></div>`;
+    }
+    if (shipHere) {
+      const installed = new Set(c.workshops.map((w) => w.recipe_id));
+      const installable = state.player.workshopCatalog
+        .filter((w) => w.unlocked && !installed.has(w.recipe_id));
+      if (installable.length > 0) {
+        html += `<div>`;
+        for (const w of installable) {
+          html += `<button class="action-btn install-btn" data-cid="${c.id}" data-recipe="${w.recipe_id}"
+            ${state.player.credits < w.cost ? 'disabled' : ''}>
+            + ${w.name} (${fmtQty(w.cost)} cr)</button>`;
+        }
+        html += `</div>`;
+      } else if (c.workshops.length === 0) {
+        html += `<div class="industry io">Recherchez des filières (bouton TECH) pour installer des ateliers</div>`;
+      }
+    }
+  } else if (shipHere && state.player.concessions.length < state.player.maxConcessions) {
+    html += `
+      <div class="section-label">Industrie</div>
+      <button class="action-btn" id="btn-buy-concession">
+        Acheter une concession ici (${fmtQty(state.player.nextConcessionPrice)} cr — Prospection requise)
+      </button>
     `;
   }
 
@@ -610,20 +657,48 @@ function renderDockedPanel(planet, market) {
     });
   }
 
-  $('#btn-collect')?.addEventListener('click', async () => {
-    const r = await apiPost('/concession/collect', { shipId });
-    if (r.ok) log(`${fmtQty(r.moved)} ${c.resourceName} chargés en soute`);
-    else log(`Chargement impossible : ${r.error}`);
+  for (const btn of panel.querySelectorAll('.collect-btn')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost('/concession/collect', { shipId, resourceId: btn.dataset.res });
+      if (r.ok) log(`${fmtQty(r.moved)} ${r.name} chargés en soute`);
+      else log(`Chargement impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+
+  $('#btn-deposit')?.addEventListener('click', async () => {
+    const r = await apiPost('/concession/deposit', { shipId, resourceId: $('#deposit-res').value });
+    if (r.ok) log(`${fmtQty(r.moved)} ${r.name} déposés à l'entrepôt`);
+    else log(`Dépôt impossible : ${r.error}`);
     await refreshPlayerAndKnowledge();
-    refreshPlanetPanel();
+    refreshPlanetPanelForce();
   });
 
-  $('#btn-upgrade')?.addEventListener('click', async () => {
-    const r = await apiPost('/concession/upgrade');
+  $('#btn-upgrade')?.addEventListener('click', async (e) => {
+    const r = await apiPost('/concession/upgrade', { concessionId: Number(e.target.dataset.cid) });
     if (r.ok) log(`Concession niveau ${r.level} — extraction ${fmtNum.format(r.rate)}/tick (−${fmtInt.format(r.cost)} cr)`);
     else log(`Amélioration impossible : ${r.error}`);
     await refreshPlayerAndKnowledge();
     refreshPlanetPanel();
+  });
+
+  for (const btn of panel.querySelectorAll('.install-btn')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/concessions/${btn.dataset.cid}/workshops`, { recipeId: btn.dataset.recipe });
+      if (r.ok) log(`Atelier ${r.name} installé (−${fmtQty(r.cost)} cr)`);
+      else log(`Installation impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+
+  $('#btn-buy-concession')?.addEventListener('click', async () => {
+    const r = await apiPost('/concessions/buy', { shipId });
+    if (r.ok) log(`Concession acquise sur ${r.planetName} — extraction de ${r.resourceName} (−${fmtQty(r.price)} cr)`);
+    else log(`Achat impossible : ${r.error}`);
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
   });
 
   $('#btn-refuel')?.addEventListener('click', async () => {
@@ -768,6 +843,52 @@ async function renderRemotePanel(planet, market) {
     slot.innerHTML = `<div class="info-block">Voyage impossible : ${preview.error}</div>`;
   }
 }
+
+// ── Panneau : technologies ───────────────────────────────────────
+
+async function renderTechPanel() {
+  const techs = await api('/tech');
+  state.selectedPlanet = null;
+
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title">Technologies</h2>
+    <p class="panel-sub">La recherche débloque des filières d'atelier pour vos
+      concessions et des améliorations permanentes.</p>
+  `;
+  for (const t of techs) {
+    const status = t.owned ? '<span class="badge live">ACQUISE</span>'
+      : t.available ? `<button class="action-btn research-btn" data-tech="${t.id}"
+          ${state.player.credits < t.cost ? 'disabled' : ''}>Rechercher (${fmtQty(t.cost)} cr)</button>`
+        : `<span class="badge locked">requiert ${t.requiresName}</span>`;
+    const detail = t.desc ?? `Ateliers : ${t.unlocks
+      .map((r) => state.player.workshopCatalog.find((w) => w.recipe_id === r)?.name ?? r).join(', ')}`;
+    html += `
+      <div class="info-block">
+        <div class="row"><span><strong>${t.name}</strong></span><span>${status}</span></div>
+        <div style="color:var(--dim);margin-top:3px">${detail}</div>
+      </div>
+    `;
+  }
+
+  panel.innerHTML = html;
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+  for (const btn of panel.querySelectorAll('.research-btn')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost('/tech/research', { techId: btn.dataset.tech });
+      if (r.ok) log(`Recherche aboutie : ${r.name} (−${fmtQty(r.cost)} cr)`);
+      else log(`Recherche impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      renderHudPlayer();
+      renderTechPanel();
+    });
+  }
+}
+
+$('#btn-tech').addEventListener('click', renderTechPanel);
 
 // ── Panneau : faction ────────────────────────────────────────────
 

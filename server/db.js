@@ -103,12 +103,35 @@ CREATE TABLE IF NOT EXISTS ship_cargo (
   PRIMARY KEY (ship_id, resource_id)
 );
 
-CREATE TABLE IF NOT EXISTS concession (
-  id          INTEGER PRIMARY KEY CHECK (id = 1), -- singleton
-  planet_id   INTEGER NOT NULL,
+-- Concessions du joueur (plusieurs depuis la Phase 6). resource_id =
+-- ressource extraite (la plus abondante du biome local).
+CREATE TABLE IF NOT EXISTS concessions (
+  id          INTEGER PRIMARY KEY,
+  planet_id   INTEGER NOT NULL UNIQUE,
   resource_id TEXT NOT NULL,
-  level       INTEGER NOT NULL,
-  stockpile   REAL NOT NULL
+  level       INTEGER NOT NULL DEFAULT 1
+);
+
+-- Entrepôt multi-ressources d'une concession : l'extraction y entre, les
+-- ateliers y puisent et y déposent, le joueur charge/décharge sa soute.
+CREATE TABLE IF NOT EXISTS facility_storage (
+  concession_id INTEGER NOT NULL,
+  resource_id   TEXT NOT NULL,
+  quantity      REAL NOT NULL,
+  PRIMARY KEY (concession_id, resource_id)
+);
+
+-- Ateliers installés : chaque atelier exécute sa recette à cadence fixe,
+-- borné par les entrées disponibles dans l'entrepôt (loi du minimum).
+CREATE TABLE IF NOT EXISTS facility_workshops (
+  concession_id INTEGER NOT NULL,
+  recipe_id     TEXT NOT NULL,
+  PRIMARY KEY (concession_id, recipe_id)
+);
+
+CREATE TABLE IF NOT EXISTS player_tech (
+  tech_id       TEXT PRIMARY KEY,
+  acquired_tick INTEGER NOT NULL
 );
 
 -- Ce que le joueur SAIT des marchés : derniers prix vus, avec leur date.
@@ -242,6 +265,30 @@ export function createDb(path) {
     const cols = db.pragma(`table_info(${m.table})`).map((c) => c.name);
     if (!cols.includes(m.column)) db.exec(m.ddl);
   }
+
+  // Migration Phase 6 : l'ancienne concession unique devient la première
+  // entrée de la table des concessions, son entrepôt mono-ressource passe
+  // dans le stockage multi-ressources.
+  const hasOldTable = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'concession'"
+  ).get();
+  if (hasOldTable) {
+    const old = db.prepare('SELECT * FROM concession WHERE id = 1').get();
+    if (old && !db.prepare('SELECT 1 FROM concessions LIMIT 1').get()) {
+      db.transaction(() => {
+        const newId = db.prepare(
+          'INSERT INTO concessions (planet_id, resource_id, level) VALUES (?, ?, ?)'
+        ).run(old.planet_id, old.resource_id, old.level).lastInsertRowid;
+        if (old.stockpile > 0) {
+          db.prepare(
+            'INSERT INTO facility_storage (concession_id, resource_id, quantity) VALUES (?, ?, ?)'
+          ).run(newId, old.resource_id, old.stockpile);
+        }
+      })();
+    }
+    db.exec('DROP TABLE concession');
+  }
+
   return db;
 }
 
@@ -267,9 +314,10 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
+      'player_tech', 'facility_workshops', 'facility_storage', 'concessions',
       'world_events', 'faction_standing', 'war_fronts', 'wars', 'faction_relations',
       'contracts', 'traders', 'shipments', 'factions',
-      'trade_partners', 'known_prices', 'concession', 'ship_cargo', 'ships',
+      'trade_partners', 'known_prices', 'ship_cargo', 'ships',
       'player', 'price_history', 'planet_industries', 'planet_resources',
       'system_distances', 'planets', 'systems', 'meta',
     ]) {

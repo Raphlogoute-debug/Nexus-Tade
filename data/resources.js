@@ -34,6 +34,8 @@ export const RESOURCES = {
   polymers: { name: 'Polymères', tier: 'intermediate', basePrice: 28 },
   ceramics: { name: 'Céramiques', tier: 'intermediate', basePrice: 22 },
   meds: { name: 'Médicaments', tier: 'intermediate', basePrice: 48 },
+  antimatter: { name: 'Antimatière', tier: 'intermediate', basePrice: 130 },
+  quantum_chips: { name: 'Puces quantiques', tier: 'intermediate', basePrice: 105 },
 
   // ── Produits finis ─────────────────────────────────────────────
   mech_parts: { name: 'Composants mécaniques', tier: 'finished', basePrice: 70 },
@@ -41,6 +43,7 @@ export const RESOURCES = {
   consumer_goods: { name: 'Biens de consommation', tier: 'finished', basePrice: 60 },
   luxury_goods: { name: 'Biens de luxe', tier: 'finished', basePrice: 160 },
   adv_components: { name: 'Composants avancés', tier: 'finished', basePrice: 95 },
+  jump_drives: { name: 'Moteurs à saut', tier: 'finished', basePrice: 480 },
 };
 
 export const RESOURCE_IDS = Object.keys(RESOURCES);
