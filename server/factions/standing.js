@@ -54,8 +54,32 @@ export function marketOpen(db, planetFactionId) {
   return getStanding(db, planetFactionId) > S.BLACKLIST;
 }
 
+// Démasquage d'un pavillon de complaisance : la faction brûle la
+// couverture, retient le grief, et la suite (saisie, refus) s'applique.
+function exposeFlag(db, tick, ship, factionId) {
+  db.prepare('UPDATE ships SET false_flag = 0 WHERE id = ?').run(ship.id);
+  adjustStanding(db, factionId, -CONFIG.SMUGGLING.STANDING_HIT);
+  const faction = db.prepare('SELECT name FROM factions WHERE id = ?').get(factionId);
+  logEvent(db, tick, 'smuggle',
+    `CONTREBANDE — le pavillon de complaisance de ${ship.name} est percé à jour par ${faction.name}`,
+    factionId);
+}
+
+// Une opération sous pavillon est-elle risquée ici ? (marché qui vous est
+// fermé, ou matériel stratégique vendu à un belligérant). Si oui, jet de
+// détection — démasqué, vous perdez le pavillon et de la réputation.
+export function onFlaggedTrade(db, tick, ship, planetFactionId, resourceId) {
+  if (planetFactionId === null) return null; // la Frange ne pose pas de questions
+  const risky = getStanding(db, planetFactionId) <= S.BLACKLIST
+    || (STRATEGIC.has(resourceId) && warContext(db).factionWar.has(planetFactionId));
+  if (!risky || Math.random() >= CONFIG.SMUGGLING.DETECTION) return null;
+  exposeFlag(db, tick, ship, planetFactionId);
+  return { detected: true };
+}
+
 // Saisie de cargaison stratégique à l'arrivée dans un système de front
-// tenu par une faction qui vous tient en grief.
+// tenu par une faction qui vous tient en grief. Un pavillon de
+// complaisance passe la douane — sauf s'il est percé à jour.
 export function maybeSeizeCargo(db, tick, ship, planetId) {
   const info = db.prepare(
     `SELECT s.id AS system_id, s.faction_id, p.name AS planet_name
@@ -66,6 +90,10 @@ export function maybeSeizeCargo(db, tick, ship, planetId) {
   const ctx = warContext(db);
   if (!ctx.frontSystems.has(info.system_id)) return null;
   if (getStanding(db, info.faction_id) > S.SEIZURE) return null;
+  if (ship.false_flag) {
+    if (Math.random() >= CONFIG.SMUGGLING.DETECTION) return null; // douane passée
+    exposeFlag(db, tick, ship, info.faction_id);
+  }
 
   const seized = db.prepare(
     `SELECT resource_id, quantity FROM ship_cargo

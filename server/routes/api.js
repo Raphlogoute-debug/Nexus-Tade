@@ -22,6 +22,8 @@ import { createRoute, listRoutes, deleteRoute, assignRoute } from '../player/rou
 import {
   investIndustry, divestIndustry, listInvestments, industryValuation, getShare,
 } from '../player/investments.js';
+import { buyFalseFlag } from '../player/smuggling.js';
+import { issueLoan, listLoans } from '../factions/loans.js';
 import { previewTrade, executeTrade, refuel, buyLicence } from '../player/trade.js';
 import { previewTravel, startTravel } from '../player/travel.js';
 import {
@@ -259,8 +261,24 @@ export function createApiRouter(db, clock) {
         }));
       })(),
       investments: listInvestments(db),
+      loans: listLoans(db),
       tradePartners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
     });
+  });
+
+  // ── Contrebande & finance de guerre ────────────────────────────
+  router.post('/ships/:id/flag', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id de vaisseau invalide' });
+    answer(res, buyFalseFlag(db, id));
+  });
+
+  router.post('/loans', (req, res) => {
+    const { factionId, amount } = req.body ?? {};
+    if (!Number.isInteger(factionId) || !Number.isFinite(amount)) {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, issueLoan(db, factionId, amount));
   });
 
   // ── Parts d'industries ─────────────────────────────────────────

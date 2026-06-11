@@ -256,7 +256,7 @@ function renderFleetBar() {
       ? state.planetIndex.get(ship.planet_id).planet.name
       : `→ ${state.planetIndex.get(ship.dest_planet_id).planet.name} (t${ship.arrival_tick})`;
     chip.innerHTML = `
-      <span class="ship-name">${ship.name}</span>
+      <span class="ship-name">${ship.false_flag ? '⚑ ' : ''}${ship.name}</span>
       <span>${ship.classLabel}</span>
       <span>${where}</span>
       <span>${fmtQty(ship.cargoUsed)}/${fmtQty(ship.cargo_capacity)}</span>
@@ -575,6 +575,17 @@ function renderDockedPanel(planet, market) {
     `;
   }
 
+  // La Frange vend des pavillons de complaisance (anonymat commercial).
+  if (shipHere && planet.faction_id === null && !ship.false_flag) {
+    html += `
+      <div class="section-label">Bas-fonds de la Frange</div>
+      <button class="action-btn" id="btn-flag"
+        title="Anonymat : listes noires ouvertes, douanes passées, ventes de guerre sans réputation — jusqu'à la détection">
+        Pavillon de complaisance pour ${ship.name} (${fmtQty(8000)} cr)
+      </button>
+    `;
+  }
+
   // Chantier civil : acheter des vaisseaux sur les mondes établis.
   if (shipHere && planet.tier >= 2) {
     html += `<div class="section-label">Chantier civil — flotte ${state.player.ships.length}/${state.player.maxFleet}</div><div>`;
@@ -721,6 +732,14 @@ function renderDockedPanel(planet, market) {
       refreshPlanetPanelForce();
     });
   }
+
+  $('#btn-flag')?.addEventListener('click', async () => {
+    const r = await apiPost(`/ships/${shipId}/flag`);
+    if (r.ok) log(`${r.shipName} navigue désormais sous pavillon de complaisance (−${fmtQty(r.cost)} cr)`);
+    else log(`Pavillon refusé : ${r.error}`);
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
 
   $('#btn-buy-concession')?.addEventListener('click', async () => {
     const r = await apiPost('/concessions/buy', { shipId });
@@ -1092,6 +1111,8 @@ async function renderFactionPanel(factionId) {
   `;
 
   if (f.war) {
+    const myLoans = (state.player.loans ?? [])
+      .filter((l) => l.faction_id === f.id && l.status === 'open');
     html += `
       <div class="section-label">⚔ En guerre</div>
       <div class="info-block" style="border-color:#f04545">
@@ -1099,6 +1120,12 @@ async function renderFactionPanel(factionId) {
         <div class="row"><span>Depuis</span><span>tick ${f.war.since}</span></div>
         ${f.war.fronts.map((fr) => `<div class="row"><span>Front : ${fr.name}</span>
           <span>${fr.pressure > 0 ? '◀ attaque' : fr.pressure < 0 ? 'défense ▶' : 'stable'}</span></div>`).join('')}
+        <div class="row" style="margin-top:6px"><span>Prêt de guerre</span><span>
+          <input type="number" id="loan-amount" min="5000" step="1000" value="10000"
+            style="width:90px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;padding:3px 5px">
+          <button class="action-btn" id="btn-loan">Prêter</button></span></div>
+        ${myLoans.map((l) => `<div class="row"><span>Créance en cours</span>
+          <span>${fmtQty(l.amount)} cr (×1,3 si victoire)</span></div>`).join('')}
       </div>
     `;
   }
@@ -1149,6 +1176,15 @@ async function renderFactionPanel(factionId) {
   panel.innerHTML = html;
   $('#back-to-system').addEventListener('click', () => {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+  });
+  $('#btn-loan')?.addEventListener('click', async () => {
+    const amount = Number($('#loan-amount').value);
+    const r = await apiPost('/loans', { factionId: f.id, amount });
+    if (r.ok) log(`Prêt de guerre : ${fmtQty(r.amount)} cr à ${r.factionName} — remboursé ×1,3 s'ils gagnent`);
+    else log(`Prêt refusé : ${r.error}`);
+    await refreshPlayerAndKnowledge();
+    renderHudPlayer();
+    renderFactionPanel(factionId);
   });
   for (const btn of panel.querySelectorAll('.deliver-btn')) {
     btn.addEventListener('click', async () => {

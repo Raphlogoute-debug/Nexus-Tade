@@ -17,7 +17,7 @@ import {
   getPlayer, getShip, cargoUsed, adjustCredits, addPrestige, tierOf, hasTierAccess,
 } from './state.js';
 import { recordFullSnapshot } from './knowledge.js';
-import { marketOpen, onPlayerSale } from '../factions/standing.js';
+import { marketOpen, onPlayerSale, onFlaggedTrade } from '../factions/standing.js';
 
 const PRESTIGE = CONFIG.PLAYER.PRESTIGE;
 
@@ -41,8 +41,9 @@ function prepareOrder(db, { side, resourceId, quantity, shipId }) {
       error: `marché de tier ${tier} : prestige ${CONFIG.PLAYER.TIERS[tier].prestige} ou licence requis`,
     };
   }
-  // Liste noire : une faction que vous avez trop contrariée ferme boutique.
-  if (!marketOpen(db, planet.faction_id)) {
+  // Liste noire : une faction que vous avez trop contrariée ferme
+  // boutique — sauf si le vaisseau navigue sous pavillon de complaisance.
+  if (!marketOpen(db, planet.faction_id) && !ship.false_flag) {
     return { ok: false, error: 'votre nom est sur liste noire ici — marché fermé' };
   }
 
@@ -128,8 +129,14 @@ export function executeTrade(db, { side, resourceId, quantity, shipId }) {
     }
     if (prestigeGained > 0) addPrestige(db, prestigeGained);
 
-    // Réputation : vendre du matériel stratégique à un belligérant engage.
-    if (side === 'sell') standingShift = onPlayerSale(db, tick, planet.faction_id, resourceId, quantity);
+    // Réputation : vendre du matériel stratégique à un belligérant engage —
+    // sauf sous pavillon de complaisance : anonyme dans les deux sens,
+    // mais chaque opération risquée peut percer la couverture.
+    if (ship.false_flag) {
+      onFlaggedTrade(db, tick, ship, planet.faction_id, resourceId);
+    } else if (side === 'sell') {
+      standingShift = onPlayerSale(db, tick, planet.faction_id, resourceId, quantity);
+    }
 
     recordFullSnapshot(db, planet.id, tick); // on voit ce qu'on vient de faire
   })();

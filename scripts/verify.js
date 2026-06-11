@@ -23,6 +23,8 @@ import {
 import { researchTech } from '../server/player/tech.js';
 import { createRoute, assignRoute, deleteRoute } from '../server/player/routes.js';
 import { investIndustry, divestIndustry } from '../server/player/investments.js';
+import { issueLoan } from '../server/factions/loans.js';
+import { buyFalseFlag } from '../server/player/smuggling.js';
 import { RECIPES as ALL_RECIPES } from '../data/recipes.js';
 
 const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
@@ -787,8 +789,102 @@ check(divested.ok && divested.refund > 0
   && db.prepare('SELECT COUNT(*) AS n FROM industry_shares').get().n === 0,
   divested.ok && `parts revendues : +${fmt(divested.refund)} cr (décote de 10 %)`);
 
+// ══ Phase 9 : prêts de guerre et contrebande ═════════════════════
+
+console.log('\n■ Phase 9 — finance de guerre et contrebande\n');
+
+// Nouvelle guerre entre les mêmes voisins (la paix de la Phase 4 n'aura
+// pas tenu), et le joueur finance LES DEUX camps.
+db.prepare('UPDATE factions SET fleet = 60, readiness = 1 WHERE id = ?').run(attacker.id);
+db.prepare('UPDATE factions SET fleet = 35, readiness = 0.8 WHERE id = ?').run(defender.id);
+attacker.fleet = 60;
+defender.fleet = 35;
+const warId2 = declareWar(db, getCurrentTick(db), attacker, defender);
+
+const neutral = db.prepare(
+  'SELECT id FROM factions WHERE id NOT IN (?, ?) LIMIT 1').get(attacker.id, defender.id);
+const refusedLoan = issueLoan(db, neutral.id, 10000);
+check(!refusedLoan.ok && refusedLoan.error.includes('guerre'),
+  `pas de prêt en temps de paix : « ${refusedLoan.error} »`);
+
+db.prepare('UPDATE player SET credits = 100000 WHERE id = 1').run();
+const modulesBefore = db.prepare(
+  "SELECT stock FROM planet_resources WHERE planet_id = ? AND resource_id = 'ship_modules'"
+).get(attackerCapital).stock;
+const standingBefore = getStanding(db, attacker.id);
+const loanA = issueLoan(db, attacker.id, 20000);
+const modulesAfter = db.prepare(
+  "SELECT stock FROM planet_resources WHERE planet_id = ? AND resource_id = 'ship_modules'"
+).get(attackerCapital).stock;
+check(loanA.ok && modulesAfter > modulesBefore && getStanding(db, attacker.id) > standingBefore,
+  `prêt de 20 000 cr à ${attacker.name} : le matériel arrive aussitôt au chantier`
+  + ` (modules ${modulesBefore.toFixed(0)} → ${modulesAfter.toFixed(0)}), réputation en hausse`);
+
+const loanB = issueLoan(db, defender.id, 8000);
+check(loanB.ok, `et 8 000 cr à ${defender.name} — on finance les deux camps, naturellement`);
+
+// Victoire de l'attaquant : son créancier est remboursé ×1,3, celui du
+// vaincu perd tout.
+db.prepare('UPDATE wars SET started_tick = ? WHERE id = ?')
+  .run(getCurrentTick(db) - CONFIG.WAR.MIN_DURATION - 5, warId2);
+db.prepare('UPDATE factions SET fleet = 4 WHERE id = ?').run(defender.id);
+const creditsWar = getPlayer(db).credits;
+tickWars(db, getCurrentTick(db));
+const loanRows = db.prepare('SELECT * FROM loans WHERE war_id = ? ORDER BY id').all(warId2);
+check(loanRows[0].status === 'repaid' && loanRows[0].payout === 26000
+  && getPlayer(db).credits === creditsWar + 26000,
+  `victoire de l'emprunteur : +26 000 cr (20 000 × 1,3)`);
+check(loanRows[1].status === 'defaulted' && loanRows[1].payout === 0,
+  `capitulation du vaincu : les 8 000 cr prêtés partent en fumée`);
+
+// ── Contrebande ──────────────────────────────────────────────────
+// Liste noire chez le vaincu, mais un pavillon de complaisance acheté
+// dans la Frange ouvre à nouveau ses marchés — jusqu'à la détection.
+db.prepare('INSERT INTO faction_standing (faction_id, standing) VALUES (?, -60) '
+  + 'ON CONFLICT(faction_id) DO UPDATE SET standing = -60').run(defender.id);
+const defPlanet = db.prepare(
+  `SELECT p.id FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id = ? LIMIT 1`).get(defender.id);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(defPlanet.id, flagship.id);
+check(!executeTrade(db, { side: 'buy', resourceId: 'water', quantity: 2 }).ok,
+  'sans pavillon : liste noire, marché fermé');
+
+const wrongPlace = buyFalseFlag(db, flagship.id);
+check(!wrongPlace.ok && wrongPlace.error.includes('Frange'),
+  `le pavillon ne s'achète que dans la Frange : « ${wrongPlace.error} »`);
+
+const fringePlanet = db.prepare(
+  `SELECT p.id FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id IS NULL LIMIT 1`).get();
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(fringePlanet.id, flagship.id);
+const flag = buyFalseFlag(db, flagship.id);
+check(flag.ok, `pavillon de complaisance acquis dans la Frange (−${fmt(flag.cost)} cr)`);
+
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(defPlanet.id, flagship.id);
+CONFIG.SMUGGLING.DETECTION = 0; // douaniers distraits pour le test
+const smuggled = executeTrade(db, { side: 'buy', resourceId: 'water', quantity: 2 });
+check(smuggled.ok, 'sous pavillon : la liste noire s\'ouvre, l\'achat passe');
+
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'ship_modules', 20, 40)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 20, avg_cost = 40`
+).run(flagship.id);
+const anonBefore = getStanding(db, defender.id);
+executeTrade(db, { side: 'sell', resourceId: 'ship_modules', quantity: 10 });
+check(getStanding(db, defender.id) === anonBefore,
+  'vente anonyme : aucune réputation engagée, dans aucun sens');
+
+CONFIG.SMUGGLING.DETECTION = 1; // cette fois, la douane veille
+const exposed = executeTrade(db, { side: 'sell', resourceId: 'ship_modules', quantity: 10 });
+const flagAfter = getShip(db, flagship.id).false_flag;
+check(exposed.ok && flagAfter === 0 && getStanding(db, defender.id) < anonBefore,
+  `démasqué : pavillon brûlé, réputation ${anonBefore} → ${getStanding(db, defender.id)}`);
+check(!executeTrade(db, { side: 'buy', resourceId: 'water', quantity: 2 }).ok,
+  'sans couverture, la liste noire reprend ses droits');
+CONFIG.SMUGGLING.DETECTION = 0.1;
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 8 vérifiées : économie, commerce, factions, guerres, flotte, industrie, routes et investissements OK\n');
+  : '\n✓ Phases 1 à 9 vérifiées : économie, guerres, flotte, industrie, routes, investissements, prêts et contrebande OK\n');
 process.exit(failures ? 1 : 0);

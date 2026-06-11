@@ -4,14 +4,15 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 8 terminée** — vous êtes aussi actionnaire : des
-**parts d'industries planétaires** (jusqu'à 49 %) qui versent des
-dividendes sur la production *réelle* de chaque tick — une usine
-étranglée par les pénuries ne rapporte rien. Et un catalogue porté à
-**37 ressources** (16 brutes : titane, uranium, biomasse, deutérium,
-terres rares, gemmes… chacune avec son identité de biome et ses
-débouchés). Le tout par-dessus les routes logistiques, l'industrie sur
-concession, la flotte et les guerres des phases précédentes.
+**État actuel : Phase 9 terminée** — la panoplie complète du profiteur de
+guerre : **prêts de guerre** (l'argent part immédiatement en matériel au
+chantier de l'emprunteur — votre prêt renforce vraiment son camp ;
+remboursé ×1,3 s'il gagne, perdu s'il capitule) et **contrebande** (un
+pavillon de complaisance acheté dans la Frange ouvre les listes noires,
+passe les douanes des fronts et rend vos ventes de guerre anonymes —
+jusqu'à la détection, qui brûle la couverture). Par-dessus : actionnariat
+industriel, routes logistiques, industrie sur concession, flotte,
+guerres — et 37 ressources.
 
 ## Lancer
 
@@ -207,6 +208,19 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   leurs débouchés : plaques de coque, combustible nucléaire, engrais,
   cellules à fusion, capteurs ; filières rattachées à l'arbre techno
 
+**Phase 9 — finance de guerre et contrebande** (`server/factions/loans.js`,
+`server/player/smuggling.js`)
+- **Prêts de guerre** : prêter à un belligérant (panneau faction) ;
+  60 % du prêt se transforme aussitôt en matériel de guerre aux stocks de
+  sa capitale (votre argent déplace les fronts) ; victoire = ×1,3, paix
+  d'épuisement = ×1,1, capitulation = défaut total ; le créancier est
+  connu des deux camps (réputation)
+- **Pavillon de complaisance** (8 000 cr, dans la Frange uniquement) :
+  le vaisseau devient anonyme — listes noires ouvertes, douanes des
+  fronts passées, ventes stratégiques sans effet de réputation (ni gain
+  ni grief) ; chaque opération risquée a 10 % de chances de percer la
+  couverture : pavillon brûlé, −15 de réputation, et la saisie suit
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - Carte canvas : territoires de faction (halos), capitales (losanges),
   brouillard de connaissance (opacité par fraîcheur), vaisseau et ligne de
@@ -244,6 +258,8 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `POST /api/concessions/buy` · `POST /api/concessions/:id/workshops` | nouveau site, installation d'atelier |
 | `GET/POST /api/routes` · `DELETE /api/routes/:id` · `POST /api/ships/:id/route` | routes logistiques et assignation |
 | `POST /api/industry/invest` · `/divest` | parts d'industries planétaires |
+| `POST /api/loans` | prêt de guerre à un belligérant |
+| `POST /api/ships/:id/flag` | pavillon de complaisance (Frange) |
 | `POST /api/admin/regenerate` | nouvel univers + nouvelle partie (dev) |
 
 Toutes les commandes de vaisseau acceptent un `shipId` (défaut :
@@ -299,11 +315,12 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
   prix vivants seulement), voisinages stellaires précalculés et scans
   partagés pour les PNJ et la flotte.
 
-## Reste à faire (Phase 9+)
+## Reste à faire (Phase 10+)
 
-- Contrebande (franchir blocus et listes noires), prêts de guerre
 - Recettes alternatives (rendements différents selon la filière),
   ressources exotiques ultra-rares par biome
+- Objectifs/fins de partie (premier milliard ? monopole d'une chaîne ?),
+  équilibrage global après sessions de jeu réelles
 - SSE à la place du polling ; état de simulation en mémoire si un jour
   les ~100 ms/tick ne suffisent plus ; événements économiques (repoussés
   à la demande du joueur)

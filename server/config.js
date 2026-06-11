@@ -276,6 +276,27 @@ export const CONFIG = {
     WANDER_P: 0.25,     // probabilité d'aller voir ailleurs si rien à faire
   },
 
+  // Contrebande : un pavillon de complaisance acheté dans la Frange rend
+  // un vaisseau anonyme — les listes noires s'ouvrent, les douanes des
+  // fronts le laissent passer, et les ventes de guerre n'engagent plus
+  // votre nom. Mais chaque opération risquée peut percer la couverture.
+  SMUGGLING: {
+    FLAG_COST: 8000,
+    DETECTION: 0.1,      // probabilité de détection par opération risquée
+    STANDING_HIT: 15,    // colère de la faction qui vous démasque
+  },
+
+  // Prêts de guerre : financer un camp. L'argent part immédiatement en
+  // matériel (stocks de la capitale) — votre prêt renforce VRAIMENT
+  // l'emprunteur, ce qui améliore vos chances d'être remboursé.
+  LOANS: {
+    MIN: 5000,
+    VICTORY_MULT: 1.3,   // remboursement si l'emprunteur gagne
+    PEACE_MULT: 1.1,     // paix d'épuisement : remboursé sans gloire
+    SPEND_RATIO: 0.6,    // part du prêt convertie en matériel de guerre
+    STANDING_PER_1000: 1,
+  },
+
   // Réputation du joueur PAR FACTION : vendre du matériel stratégique à un
   // belligérant se sait — et son ennemi s'en souvient.
   STANDING: {

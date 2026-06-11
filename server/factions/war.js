@@ -6,6 +6,7 @@
 
 import { CONFIG } from '../config.js';
 import { logEvent } from '../events.js';
+import { resolveWarLoans } from './loans.js';
 
 const W = CONFIG.WAR;
 
@@ -110,6 +111,8 @@ function endWar(db, tick, war, result, attacker, defender) {
     : `PAIX — ${(result === 'attacker' ? attacker : defender).name} l'emporte sur `
       + `${(result === 'attacker' ? defender : attacker).name}`;
   logEvent(db, tick, 'peace', message, null);
+
+  resolveWarLoans(db, war, result, tick); // l'heure des comptes pour les créanciers
 }
 
 function round2(n) {

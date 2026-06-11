@@ -134,6 +134,18 @@ CREATE TABLE IF NOT EXISTS player_tech (
   acquired_tick INTEGER NOT NULL
 );
 
+-- Prêts de guerre du joueur : remboursés (avec intérêts) si l'emprunteur
+-- gagne ou signe la paix ; perdus s'il capitule.
+CREATE TABLE IF NOT EXISTS loans (
+  id          INTEGER PRIMARY KEY,
+  faction_id  INTEGER NOT NULL,
+  war_id      INTEGER NOT NULL,
+  amount      REAL NOT NULL,
+  issued_tick INTEGER NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'open', -- open | repaid | defaulted
+  payout      REAL
+);
+
 -- Parts du joueur dans les industries planétaires (share ∈ ]0, 0.49]).
 CREATE TABLE IF NOT EXISTS industry_shares (
   planet_id INTEGER NOT NULL,
@@ -281,6 +293,7 @@ const MIGRATIONS = [
   { table: 'ships', column: 'class', ddl: "ALTER TABLE ships ADD COLUMN class TEXT NOT NULL DEFAULT 'freighter'" },
   { table: 'ships', column: 'route_id', ddl: 'ALTER TABLE ships ADD COLUMN route_id INTEGER' },
   { table: 'ships', column: 'route_stop', ddl: 'ALTER TABLE ships ADD COLUMN route_stop INTEGER NOT NULL DEFAULT 0' },
+  { table: 'ships', column: 'false_flag', ddl: 'ALTER TABLE ships ADD COLUMN false_flag INTEGER NOT NULL DEFAULT 0' },
 ];
 
 export function createDb(path) {
@@ -358,7 +371,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
-      'industry_shares', 'route_stops', 'routes',
+      'loans', 'industry_shares', 'route_stops', 'routes',
       'player_tech', 'facility_workshops', 'facility_storage', 'concessions',
       'world_events', 'faction_standing', 'war_fronts', 'wars', 'faction_relations',
       'contracts', 'traders', 'shipments', 'factions',
