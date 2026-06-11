@@ -134,6 +134,22 @@ CREATE TABLE IF NOT EXISTS player_tech (
   acquired_tick INTEGER NOT NULL
 );
 
+-- Routes logistiques : un circuit d'étapes que des vaisseaux assignés
+-- parcourent en boucle (mode 'route'), exécutant les actions de chaque
+-- étape (charger/déposer à vos concessions, acheter/vendre au marché).
+CREATE TABLE IF NOT EXISTS routes (
+  id   INTEGER PRIMARY KEY,
+  name TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS route_stops (
+  route_id  INTEGER NOT NULL,
+  position  INTEGER NOT NULL,
+  planet_id INTEGER NOT NULL,
+  actions   TEXT NOT NULL, -- JSON : [{ type, resourceId?, quantity? }]
+  PRIMARY KEY (route_id, position)
+);
+
 -- Ce que le joueur SAIT des marchés : derniers prix vus, avec leur date.
 -- stock NULL = donnée de seconde main (rumeur de quai, relevé acheté).
 CREATE TABLE IF NOT EXISTS known_prices (
@@ -255,6 +271,8 @@ const MIGRATIONS = [
   { table: 'planets', column: 'supply', ddl: 'ALTER TABLE planets ADD COLUMN supply REAL NOT NULL DEFAULT 1' },
   { table: 'ships', column: 'mode', ddl: "ALTER TABLE ships ADD COLUMN mode TEXT NOT NULL DEFAULT 'manual'" },
   { table: 'ships', column: 'class', ddl: "ALTER TABLE ships ADD COLUMN class TEXT NOT NULL DEFAULT 'freighter'" },
+  { table: 'ships', column: 'route_id', ddl: 'ALTER TABLE ships ADD COLUMN route_id INTEGER' },
+  { table: 'ships', column: 'route_stop', ddl: 'ALTER TABLE ships ADD COLUMN route_stop INTEGER NOT NULL DEFAULT 0' },
 ];
 
 export function createDb(path) {
@@ -314,6 +332,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
+      'route_stops', 'routes',
       'player_tech', 'facility_workshops', 'facility_storage', 'concessions',
       'world_events', 'faction_standing', 'war_fronts', 'wars', 'faction_relations',
       'contracts', 'traders', 'shipments', 'factions',

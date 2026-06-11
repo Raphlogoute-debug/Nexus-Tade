@@ -18,6 +18,7 @@ import {
   initPlayer, getPlayer, getShip, getFleet, getCargo, cargoUsed, tierOf, hasTierAccess,
 } from '../player/state.js';
 import { buyShip, setShipMode, fleetUpkeep } from '../player/shipyard.js';
+import { createRoute, listRoutes, deleteRoute, assignRoute } from '../player/routes.js';
 import { previewTrade, executeTrade, refuel, buyLicence } from '../player/trade.js';
 import { previewTravel, startTravel } from '../player/travel.js';
 import {
@@ -277,6 +278,30 @@ export function createApiRouter(db, clock) {
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: 'id de vaisseau invalide' });
     answer(res, setShipMode(db, id, req.body?.mode));
+  });
+
+  // ── Routes logistiques ─────────────────────────────────────────
+  router.get('/routes', (req, res) => {
+    res.json(listRoutes(db));
+  });
+
+  router.post('/routes', (req, res) => {
+    answer(res, createRoute(db, req.body?.name, req.body?.stops));
+  });
+
+  router.delete('/routes/:id', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id de route invalide' });
+    answer(res, deleteRoute(db, id));
+  });
+
+  router.post('/ships/:id/route', (req, res) => {
+    const id = parseId(req.params.id);
+    const routeId = req.body?.routeId;
+    if (id === null || (routeId !== null && !Number.isInteger(routeId))) {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, assignRoute(db, id, routeId));
   });
 
   // ── GET /api/knowledge : fraîcheur par système (pour la carte) ──

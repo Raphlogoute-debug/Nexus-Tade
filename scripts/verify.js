@@ -21,6 +21,7 @@ import {
   listConcessions, collectConcession, depositToConcession, buyConcession, installWorkshop,
 } from '../server/player/concession.js';
 import { researchTech } from '../server/player/tech.js';
+import { createRoute, assignRoute, deleteRoute } from '../server/player/routes.js';
 import { RECIPES as ALL_RECIPES } from '../data/recipes.js';
 import { generateFactions } from '../server/factions/generate.js';
 import { initTraders } from '../server/npc/traders.js';
@@ -686,8 +687,54 @@ const antimatterMade = listConcessions(db).find((c) => c.id === second.id)
 check(qShop.ok && Boolean(antimatterMade) && antimatterMade.quantity > 0,
   `industrie quantique : ${antimatterMade?.quantity.toFixed(0)} antimatière synthétisée sur site (−${qShop.cost} cr d'atelier)`);
 
+// ══ Phase 7 : routes logistiques ═════════════════════════════════
+
+console.log('\n■ Phase 7 — routes logistiques (l\'usine tourne sans vous)\n');
+
+// Le scénario complet : la fonderie de la concession produit de l'acier ;
+// la route l'écoule sur un marché voisin riche en cuivre, achète ce
+// cuivre, et le rapporte à l'entrepôt pour nourrir l'atelier d'alliages.
+const homeId = homeFacility.planet_id;
+const homeSystem = db.prepare('SELECT system_id FROM planets WHERE id = ?').get(homeId).system_id;
+const hub = db.prepare(
+  `SELECT p.id, p.name FROM planets p
+   JOIN planet_resources pr ON pr.planet_id = p.id AND pr.resource_id = 'copper_ore'
+   JOIN systems s ON s.id = p.system_id, systems me
+   WHERE me.id = ? AND p.id != ? AND pr.stock > 200
+   ORDER BY (s.x - me.x) * (s.x - me.x) + (s.y - me.y) * (s.y - me.y) LIMIT 1`
+).get(homeSystem, homeId);
+
+const badRoute = createRoute(db, 'Incomplète', [{ planetId: homeId, actions: [] }]);
+check(!badRoute.ok, `validation : « ${badRoute.error} »`);
+
+const route = createRoute(db, 'Navette acier/cuivre', [
+  { planetId: homeId, actions: [{ type: 'unload', resourceId: null, quantity: null }, { type: 'load', resourceId: 'steel', quantity: null }] },
+  { planetId: hub.id, actions: [{ type: 'sell', resourceId: null, quantity: null }, { type: 'buy', resourceId: 'copper_ore', quantity: 60 }] },
+]);
+check(route.ok, `route créée : ${homeFacility.planetName ?? 'concession'} ↔ ${hub.name} (acier sortant, cuivre entrant)`);
+
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(homeId, flagship.id);
+const assigned = assignRoute(db, flagship.id, route.id);
+check(assigned.ok && getShip(db, flagship.id).mode === 'route', `${assigned.name} assigné à la route`);
+
+// Compteurs avant la boucle.
+const copperBefore = listConcessions(db)[0].storage.find((s) => s.resource_id === 'copper_ore')?.quantity ?? 0;
+const routeEventsBefore = recentEvents(db, 0, 1000).filter((e) => e.message.startsWith('ROUTE')).length;
+db.prepare('UPDATE player SET credits = 20000 WHERE id = 1').run();
+for (let i = 0; i < 24; i++) runTick(db);
+
+const copperAfter = listConcessions(db)[0].storage.find((s) => s.resource_id === 'copper_ore')?.quantity ?? 0;
+const routeEvents = recentEvents(db, 0, 1000).filter((e) => e.message.startsWith('ROUTE')).length - routeEventsBefore;
+check(routeEvents >= 2, `${routeEvents} opérations de route consignées en 24 ticks (cycles complets)`);
+check(copperAfter > copperBefore,
+  `le cuivre acheté en route arrive à l'entrepôt : ${copperBefore.toFixed(0)} → ${copperAfter.toFixed(0)} (et nourrit l'atelier d'alliages)`);
+
+const removal = deleteRoute(db, route.id);
+check(removal.ok && getShip(db, flagship.id).mode === 'manual',
+  'route supprimée → vaisseau rendu au pilotage manuel');
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 6 vérifiées : économie, commerce, factions, guerres, flotte et industrie joueur OK\n');
+  : '\n✓ Phases 1 à 7 vérifiées : économie, commerce, factions, guerres, flotte, industrie et routes OK\n');
 process.exit(failures ? 1 : 0);

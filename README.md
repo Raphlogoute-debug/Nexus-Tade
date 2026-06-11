@@ -4,15 +4,13 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 6 terminée** — vous êtes un industriel : arbre de
-10 technologies (filières de transformation + effets permanents), ateliers
-installés sur vos concessions qui transforment sur site (le filet de
-minerai devient acier, alliages… jusqu'à l'antimatière et aux moteurs à
-saut), entrepôts multi-ressources alimentés par l'extraction locale ET vos
-livraisons, concessions multiples (jusqu'à 5 mondes via Prospection), et
-26 ressources au catalogue. Avec la flotte automatisée de la Phase 5 et
-les guerres de la Phase 4, la boucle complète est là : extraire,
-transformer, transporter, vendre — et exploiter les conflits.
+**État actuel : Phase 7 terminée** — l'usine tourne sans vous : des
+**routes logistiques** (circuits d'étapes avec actions : charger/déposer à
+vos concessions, acheter/vendre au marché) parcourues en boucle par les
+vaisseaux assignés. Combinées à l'industrie de la Phase 6 (technologies,
+ateliers, concessions multiples), à la flotte sans plafond limitée par son
+entretien, et aux guerres de la Phase 4 : extraire → transformer →
+distribuer → vendre, en continu, pendant que vous chassez l'opportunité.
 
 ## Lancer
 
@@ -177,6 +175,21 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 - Migration douce : l'ancienne concession unique devient le premier site,
   entrepôt compris
 
+**Phase 7 — les routes logistiques** (`server/player/routes.js`)
+- Une route = un circuit d'étapes, chaque étape = une planète + des
+  actions : **charger** (entrepôt → soute), **déposer** (soute →
+  entrepôt), **acheter**, **vendre** — ressource précise ou « tout »,
+  quantité précise ou « max »
+- Les vaisseaux assignés (mode ROUTE) bouclent : exécution des actions à
+  quai, cap sur l'étape suivante, plein automatique ; un échec d'action
+  (entrepôt plein, marché fermé) est sauté, le circuit continue ; le
+  découvert cloue le vaisseau jusqu'à régularisation
+- Toutes les actions passent par les fonctions joueur habituelles : tiers,
+  licences, listes noires, impact prix, prestige
+- Flotte sans plafond de gameplay : **l'entretien par vaisseau par tick**
+  est la vraie limite (découvert = flotte à quai) ; testé à 100 vaisseaux
+  (204 ms/tick)
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - Carte canvas : territoires de faction (halos), capitales (losanges),
   brouillard de connaissance (opacité par fraîcheur), vaisseau et ligne de
@@ -212,6 +225,7 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |
 | `POST /api/concession/collect` · `/deposit` · `/upgrade` | transferts entrepôt↔soute, amélioration |
 | `POST /api/concessions/buy` · `POST /api/concessions/:id/workshops` | nouveau site, installation d'atelier |
+| `GET/POST /api/routes` · `DELETE /api/routes/:id` · `POST /api/ships/:id/route` | routes logistiques et assignation |
 | `POST /api/admin/regenerate` | nouvel univers + nouvelle partie (dev) |
 
 Toutes les commandes de vaisseau acceptent un `shipId` (défaut :
@@ -260,16 +274,12 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
 - **L'information est une ressource** : les prix lointains sont vieux,
   incomplets ou payants.
 
-## Reste à faire (Phase 7+) — cap sur l'économie et le joueur
+## Reste à faire (Phase 8+) — cap sur l'économie et le joueur
 
-- **Routes logistiques de flotte** : assigner un vaisseau à une navette
-  régulière entre vos concessions (livrer les entrées, écouler les
-  sorties) — l'usine tourne sans vous
 - **Parts d'industries planétaires** : investir dans les industries des
   autres mondes et toucher des dividendes
 - **Encore des chaînes** : ressources exotiques rares par biome, recettes
   alternatives (rendements différents selon la filière)
 - Contrebande (franchir blocus et listes noires), prêts de guerre
-- État de simulation en mémoire + sauvegarde différée (le tick disque
-  approche 600 ms sur les grosses parties) ; SSE à la place du polling ;
-  événements économiques (repoussés à la demande du joueur)
+- État de simulation en mémoire + sauvegarde différée ; SSE à la place du
+  polling ; événements économiques (repoussés à la demande du joueur)

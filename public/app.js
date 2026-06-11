@@ -260,8 +260,9 @@ function renderFleetBar() {
       <span>${ship.classLabel}</span>
       <span>${where}</span>
       <span>${fmtQty(ship.cargoUsed)}/${fmtQty(ship.cargo_capacity)}</span>
-      <button class="mode-toggle ${ship.mode === 'auto' ? 'auto' : ''}"
-        title="Basculer manuel/automatique">${ship.mode === 'auto' ? 'AUTO' : 'MAN'}</button>
+      <button class="mode-toggle ${ship.mode !== 'manual' ? 'auto' : ''}"
+        title="Basculer le mode (une route assignée repasse en manuel)">${
+          ship.mode === 'route' ? 'ROUTE' : ship.mode === 'auto' ? 'AUTO' : 'MAN'}</button>
     `;
     chip.addEventListener('click', () => {
       state.selectedShipId = ship.id;
@@ -273,7 +274,7 @@ function renderFleetBar() {
     chip.querySelector('.mode-toggle').addEventListener('click', async (e) => {
       e.stopPropagation();
       const r = await apiPost(`/ships/${ship.id}/mode`, {
-        mode: ship.mode === 'auto' ? 'manual' : 'auto',
+        mode: ship.mode === 'manual' ? 'auto' : 'manual',
       });
       if (r.ok) log(`${r.name} passe en mode ${r.mode === 'auto' ? 'automatique' : 'manuel'}`);
       await refreshPlayerAndKnowledge();
@@ -889,6 +890,158 @@ async function renderTechPanel() {
 }
 
 $('#btn-tech').addEventListener('click', renderTechPanel);
+
+// ── Panneau : routes logistiques ─────────────────────────────────
+// Brouillon de route côté client ; les étapes s'ajoutent depuis la
+// planète sélectionnée sur la carte ou vos concessions.
+
+const routeDraft = { name: '', stops: [] };
+
+const ACTION_LABELS = {
+  load: 'Charger (entrepôt → soute)',
+  unload: 'Déposer (soute → entrepôt)',
+  buy: 'Acheter au marché',
+  sell: 'Vendre au marché',
+};
+
+function actionSummary(a) {
+  const res = a.resourceId
+    ? (state.player.workshopCatalog.find((w) => w.recipe_id === a.resourceId)?.name ?? a.resourceId)
+    : 'tout';
+  return `${ACTION_LABELS[a.type].split(' ')[0].toLowerCase()} ${res}${a.quantity ? ` ×${a.quantity}` : ''}`;
+}
+
+async function renderRoutesPanel() {
+  const routes = await api('/routes');
+  state.selectedPlanet = null;
+
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title">Routes logistiques</h2>
+    <p class="panel-sub">Un circuit d'étapes parcouru en boucle par les
+      vaisseaux assignés — la navette régulière de vos concessions.</p>
+  `;
+
+  for (const r of routes) {
+    html += `<div class="info-block">
+      <div class="row"><span><strong>${r.name}</strong></span>
+        <span><button class="action-btn del-route" data-id="${r.id}">Supprimer</button></span></div>`;
+    for (const s of r.stops) {
+      html += `<div style="color:var(--dim)">${s.position + 1}. ${s.planet_name} —
+        ${s.actions.map(actionSummary).join(' · ') || 'simple passage'}</div>`;
+    }
+    html += `<div class="row" style="margin-top:5px">
+      <span>${r.ships.map((sh) => sh.name).join(', ') || 'aucun vaisseau'}</span>
+      <span><select class="assign-ship" data-route="${r.id}">
+        ${state.player.ships.map((sh) => `<option value="${sh.id}">${sh.name}</option>`).join('')}
+      </select>
+      <button class="action-btn assign-btn" data-route="${r.id}">Assigner</button></span></div>
+    </div>`;
+  }
+
+  // Constructeur de route.
+  html += `<div class="section-label">Nouvelle route</div>
+    <div class="info-block">
+      <input type="text" id="route-name" placeholder="Nom de la route"
+        value="${routeDraft.name}" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;padding:5px 7px">`;
+  routeDraft.stops.forEach((stop, i) => {
+    const entry = state.planetIndex.get(stop.planetId);
+    html += `<div class="row" style="margin-top:5px"><span>${i + 1}. ${entry.planet.name}
+      — ${stop.actions.map(actionSummary).join(' · ') || 'aucune action'}</span>
+      <span><button class="action-btn del-stop" data-i="${i}">✕</button></span></div>
+      <div style="margin:3px 0 6px">
+        <select class="act-type" data-i="${i}">
+          ${Object.entries(ACTION_LABELS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
+        </select>
+        <select class="act-res" data-i="${i}">
+          <option value="">(tout / max)</option>
+          ${state.player.workshopCatalog.map((w) => `<option value="${w.recipe_id}">${w.name}</option>`).join('')}
+        </select>
+        <input type="number" class="act-qty" data-i="${i}" placeholder="qté" min="1"
+          style="width:64px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;padding:3px 5px">
+        <button class="action-btn add-action" data-i="${i}">+ action</button>
+      </div>`;
+  });
+
+  const addable = [];
+  for (const c of state.player.concessions) {
+    addable.push({ id: c.planet_id, label: `${c.planetName} (votre concession)` });
+  }
+  if (state.selectedSystem) {
+    for (const p of state.selectedSystem.planets) {
+      if (!addable.some((a) => a.id === p.id)) addable.push({ id: p.id, label: p.name });
+    }
+  }
+  html += `<div class="row" style="margin-top:6px"><span>Ajouter une étape</span><span>
+      <select id="new-stop">${addable.map((a) => `<option value="${a.id}">${a.label}</option>`).join('')}</select>
+      <button class="action-btn" id="add-stop">+</button></span></div>
+    <div style="color:var(--dim);font-size:11px;margin-top:4px">Astuce : sélectionnez un
+      système sur la carte pour proposer ses planètes ici.</div>
+    <button class="action-btn" id="create-route" style="margin-top:8px"
+      ${routeDraft.stops.length < 2 ? 'disabled' : ''}>Créer la route</button>
+  </div>`;
+
+  panel.innerHTML = html;
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+  $('#route-name').addEventListener('input', (e) => { routeDraft.name = e.target.value; });
+
+  $('#add-stop').addEventListener('click', () => {
+    const planetId = Number($('#new-stop').value);
+    if (planetId) routeDraft.stops.push({ planetId, actions: [] });
+    renderRoutesPanel();
+  });
+  for (const btn of panel.querySelectorAll('.del-stop')) {
+    btn.addEventListener('click', () => {
+      routeDraft.stops.splice(Number(btn.dataset.i), 1);
+      renderRoutesPanel();
+    });
+  }
+  for (const btn of panel.querySelectorAll('.add-action')) {
+    btn.addEventListener('click', () => {
+      const i = Number(btn.dataset.i);
+      const type = panel.querySelector(`.act-type[data-i="${i}"]`).value;
+      const resourceId = panel.querySelector(`.act-res[data-i="${i}"]`).value || null;
+      const qtyRaw = panel.querySelector(`.act-qty[data-i="${i}"]`).value;
+      const quantity = qtyRaw ? Number(qtyRaw) : null;
+      routeDraft.stops[i].actions.push({ type, resourceId, quantity });
+      renderRoutesPanel();
+    });
+  }
+  $('#create-route').addEventListener('click', async () => {
+    const r = await apiPost('/routes', { name: routeDraft.name, stops: routeDraft.stops });
+    if (r.ok) {
+      log(`Route « ${r.name} » créée (${r.stops} étapes)`);
+      routeDraft.name = '';
+      routeDraft.stops = [];
+    } else {
+      log(`Route refusée : ${r.error}`);
+    }
+    renderRoutesPanel();
+  });
+  for (const btn of panel.querySelectorAll('.del-route')) {
+    btn.addEventListener('click', async () => {
+      await fetch(`/api/routes/${btn.dataset.id}`, { method: 'DELETE' });
+      log('Route supprimée — vaisseaux repassés en manuel');
+      await refreshPlayerAndKnowledge();
+      renderRoutesPanel();
+    });
+  }
+  for (const btn of panel.querySelectorAll('.assign-btn')) {
+    btn.addEventListener('click', async () => {
+      const shipId = Number(panel.querySelector(`.assign-ship[data-route="${btn.dataset.route}"]`).value);
+      const r = await apiPost(`/ships/${shipId}/route`, { routeId: Number(btn.dataset.route) });
+      if (r.ok) log(`${r.name} assigné à la route`);
+      else log(`Assignation impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      renderRoutesPanel();
+    });
+  }
+}
+
+$('#btn-routes').addEventListener('click', renderRoutesPanel);
 
 // ── Panneau : faction ────────────────────────────────────────────
 

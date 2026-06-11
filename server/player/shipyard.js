@@ -62,6 +62,8 @@ export function setShipMode(db, shipId, mode) {
   if (!['manual', 'auto'].includes(mode)) return { ok: false, error: 'mode invalide (manual | auto)' };
   const ship = getShip(db, shipId);
   if (!ship) return { ok: false, error: 'vaisseau inconnu' };
-  db.prepare('UPDATE ships SET mode = ? WHERE id = ?').run(mode, shipId);
+  // Quitter une route assignée remet le compteur d'étapes à zéro.
+  db.prepare('UPDATE ships SET mode = ?, route_id = NULL, route_stop = 0 WHERE id = ?')
+    .run(mode, shipId);
   return { ok: true, shipId, mode, name: ship.name };
 }
