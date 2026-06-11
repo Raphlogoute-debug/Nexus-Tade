@@ -4,13 +4,14 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 4 terminée** — les royaumes vivent ET se battent :
-diplomatie qui dérive, guerres déclarées sous le seuil de rupture, fronts
-qui basculent selon la force *ravitaillée*, attrition, blocus sur les
-convois, conquêtes territoriales, traités. Le joueur n'ordonne rien : il
-vend aux belligérants (contrats de guerre à premium), affame un camp,
-et gère sa réputation PAR FACTION — vendre aux deux camps se sait, et la
-douane des fronts saisit la cargaison des marchands qu'elle tient en grief.
+**État actuel : Phase 5 terminée** — vous n'êtes plus un marchand mais une
+compagnie : flotte jusqu'à 8 vaisseaux (3 classes aux chantiers civils des
+mondes T2+), capitaines automatiques qui commercent pour vous avec VOS
+règles (tiers, licences, listes noires) et rapportent prestige et crédits,
+catalogue étendu à 23 ressources (silicium, métaux précieux, hélium-3,
+épices, polymères, céramiques, médicaments, biens de luxe, composants
+avancés), et graphes de prix dans le panneau de marché. Les royaumes de la
+Phase 4 continuent de vivre et de se battre autour de vous.
 
 ## Lancer
 
@@ -138,6 +139,23 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   dans le journal de bord, carte mise à jour (fronts en anneau rouge
   pointillé, territoires recolorés après conquête)
 
+**Phase 5 — la compagnie** (`server/player/shipyard.js`, `automation.js`)
+- **Flotte** : 3 classes (Navette 100/220, Cargo 250/150, Vraquier 700/100 —
+  soute/vitesse), achat aux chantiers civils des mondes T2+, 8 vaisseaux max,
+  toutes les commandes (commerce, voyage, plein, contrats) ciblent le
+  vaisseau sélectionné dans la barre de flotte
+- **Capitaines automatiques** : un vaisseau passé en AUTO achète bas,
+  voyage, vend haut dans sa région — via les mêmes fonctions que vous
+  (executeTrade/startTravel), donc avec vos tiers, licences, listes noires ;
+  profits, prestige et réputation vous reviennent ; il gère son carburant
+  et rafraîchit votre connaissance des marchés en se déplaçant
+- **Catalogue étendu** : 10 brutes, 8 intermédiaires, 5 finies — nouvelles
+  chaînes (silicium→céramiques→composants avancés, épices→médicaments,
+  métaux précieux+polymères→biens de luxe) et nouveaux besoins civils ;
+  les sauvegardes existantes reçoivent les marchés manquants au lancement
+- **Graphes de prix** : sparkline des 60 derniers ticks dans le formulaire
+  d'ordre (l'historique servait déjà l'API)
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - Carte canvas : territoires de faction (halos), capitales (losanges),
   brouillard de connaissance (opacité par fraîcheur), vaisseau et ligne de
@@ -168,8 +186,12 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `POST /api/time` · `POST /api/time/skip` | vitesse de simulation, saut jusqu'à l'arrivée |
 | `GET /api/factions` · `GET /api/faction/:id` | royaumes : territoire, flotte, diplomatie, guerre, réputation, contrats |
 | `GET /api/contracts` · `POST /api/contracts/:id/deliver` | appels d'offres de faction et livraison |
-| `GET /api/events?since=id` | fil d'événements du monde (guerres, conquêtes, saisies) |
+| `GET /api/events?since=id` | fil d'événements du monde (guerres, conquêtes, saisies, flotte) |
+| `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `POST /api/admin/regenerate` | nouvel univers + nouvelle partie (dev) |
+
+Toutes les commandes de vaisseau acceptent un `shipId` (défaut :
+vaisseau-amiral).
 
 Validation des entrées aux frontières (400/403/404), erreurs en français.
 
@@ -214,15 +236,16 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
 - **L'information est une ressource** : les prix lointains sont vieux,
   incomplets ou payants.
 
-## Reste à faire (Phase 5+)
+## Reste à faire (Phase 6+) — cap sur l'économie et le joueur
 
-- **Flotte du joueur** : plusieurs vaisseaux, routes automatisées, drones
-  d'exploration — passer de marchand à compagnie
-- **Contrebande** : franchir les blocus et les listes noires (faux
-  pavillons, intermédiaires de la Frange), piraterie sur les convois
-- **Financer un camp** : prêts de guerre, parts dans les chantiers,
-  réparations de guerre — l'embargo actif (refuser de vendre) avec effet
-  diplomatique
-- Arbre technologique : transformation sur site à la concession
-- État de simulation en mémoire + sauvegarde différée quand l'échelle
-  l'exigera ; SSE à la place du polling ; graphes de prix dans l'UI
+- **Profondeur économique** : événements de marché (booms, krachs,
+  épidémies → demande de médicaments), contrats à terme et spéculation,
+  assurances de cargaison
+- **Concession et industrie joueur** : arbre technologique, transformation
+  sur site (fonderie, raffinerie), posséder des parts d'industries
+  planétaires, nouvelles concessions sur d'autres mondes
+- **Encore des ressources** : chaînes plus profondes (antimatière,
+  composants quantiques), ressources exotiques rares par biome
+- Contrebande (franchir blocus et listes noires), prêts de guerre
+- État de simulation en mémoire + sauvegarde différée (le tick disque
+  approche 600 ms sur les grosses parties) ; SSE à la place du polling

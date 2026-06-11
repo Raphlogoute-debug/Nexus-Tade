@@ -8,7 +8,8 @@
 
 import { CONFIG } from '../server/config.js';
 import { createDb, getCurrentTick } from '../server/db.js';
-import { generateUniverse } from '../server/universe/generator.js';
+import { generateUniverse, ensureResourceRows } from '../server/universe/generator.js';
+import { buyShip, setShipMode } from '../server/player/shipyard.js';
 import { runTick } from '../server/simulation.js';
 import { RECIPES } from '../data/recipes.js';
 import { RESOURCES } from '../data/resources.js';
@@ -536,8 +537,52 @@ const eventTypes = new Set(recentEvents(db, 0, 300).map((e) => e.type));
 check(['war', 'conquest', 'peace', 'seizure'].every((t) => eventTypes.has(t) || (t === 'seizure' && !defenderFront)),
   `fil d'événements : ${[...eventTypes].join(', ')} consignés pour le journal de bord`);
 
+// ══ Phase 5 : flotte du joueur, automatisation, nouvelles ressources ═
+
+console.log('\n■ Phase 5 — flotte, automatisation, catalogue étendu\n');
+
+// Catalogue étendu : 23 ressources, marchés présents partout.
+check(Object.keys(RESOURCES).length === 23,
+  `${Object.keys(RESOURCES).length} ressources au catalogue (6+4 brutes, 5+3 intermédiaires, 3+2 finies)`);
+const marketsPerPlanet = db.prepare(
+  'SELECT MIN(n) AS mn FROM (SELECT COUNT(*) AS n FROM planet_resources GROUP BY planet_id)'
+).get().mn;
+check(marketsPerPlanet === 23, 'chaque planète a un marché pour chacune des 23 ressources');
+
+// Migration : une planète amputée de ses nouvelles ressources les retrouve.
+db.prepare(
+  "DELETE FROM planet_resources WHERE planet_id = 1 AND resource_id IN ('silicon', 'meds', 'luxury_goods')"
+).run();
+const restored = ensureResourceRows(db);
+check(restored === 3 && db.prepare(
+  'SELECT COUNT(*) AS n FROM planet_resources WHERE planet_id = 1').get().n === 23,
+  `migration des sauvegardes : ${restored} marchés manquants recréés (production biome, conso population)`);
+
+// Achat de vaisseau au chantier d'un monde tier 2+.
+db.prepare('UPDATE player SET credits = 50000 WHERE id = 1').run();
+const t2World = db.prepare('SELECT id FROM planets WHERE population >= 50 AND population < 500 LIMIT 1').get();
+db.prepare('UPDATE ships SET planet_id = ?, mode = ? WHERE id = ?')
+  .run(t2World.id, 'manual', getShip(db).id);
+const purchase = buyShip(db, 'courier');
+check(purchase.ok && db.prepare('SELECT COUNT(*) AS n FROM ships').get().n === 2,
+  purchase.ok && `achat au chantier : ${purchase.classLabel} « ${purchase.name} » pour ${purchase.price} cr`);
+
+// Automatisation : le nouveau vaisseau passe en auto et commerce seul,
+// avec les règles du joueur (tiers, listes noires) et profits pour lui.
+setShipMode(db, purchase.shipId, 'auto');
+db.prepare('UPDATE faction_standing SET standing = 0').run(); // amnistie de test
+const creditsBeforeAuto = getPlayer(db).credits;
+const fleetEventsBefore = recentEvents(db, 0, 500).filter((e) => e.type === 'fleet').length;
+for (let i = 0; i < 25; i++) runTick(db);
+const fleetEvents = recentEvents(db, 0, 500).filter((e) => e.type === 'fleet').length - fleetEventsBefore;
+const autoShip = getShip(db, purchase.shipId);
+check(fleetEvents > 0,
+  `vaisseau automatique : ${fleetEvents} opérations en 25 ticks (crédits ${Math.round(creditsBeforeAuto)} → ${Math.round(getPlayer(db).credits)})`);
+check(autoShip.fuel <= autoShip.fuel_capacity && autoShip.fuel > 0,
+  'le capitaine automatique gère son carburant (plein au marché local)');
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 4 vérifiées : économie, commerce, factions, guerres et réputation OK\n');
+  : '\n✓ Phases 1 à 5 vérifiées : économie, commerce, factions, guerres, flotte et automatisation OK\n');
 process.exit(failures ? 1 : 0);

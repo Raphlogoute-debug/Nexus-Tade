@@ -13,37 +13,37 @@ export const BIOMES = {
     label: 'Rocheuse',
     weight: 0.24,
     popRange: [20, 1200],
-    extraction: { iron_ore: 3.0, copper_ore: 2.0, energy_crystals: 0.5 },
+    extraction: { iron_ore: 3.0, copper_ore: 2.0, energy_crystals: 0.5, silicon: 1.2, precious_metals: 0.3 },
   },
   oceanic: {
     label: 'Océanique',
     weight: 0.18,
     popRange: [50, 1500],
-    extraction: { water: 3.2, organics: 2.4 },
+    extraction: { water: 3.2, organics: 2.4, spices: 0.8 },
   },
   gas_giant: {
     label: 'Gazeuse',
     weight: 0.16,
     popRange: [1, 30], // stations orbitales uniquement
-    extraction: { rare_gas: 3.5 },
+    extraction: { rare_gas: 3.5, helium3: 2.2 },
   },
   desert: {
     label: 'Désertique',
     weight: 0.16,
     popRange: [5, 400],
-    extraction: { energy_crystals: 2.2, copper_ore: 1.6, iron_ore: 0.8 },
+    extraction: { energy_crystals: 2.2, copper_ore: 1.6, iron_ore: 0.8, silicon: 2.4 },
   },
   ice: {
     label: 'Glaciaire',
     weight: 0.14,
     popRange: [2, 200],
-    extraction: { water: 2.6, rare_gas: 1.2, organics: 0.5 },
+    extraction: { water: 2.6, rare_gas: 1.2, organics: 0.5, spices: 0.5, helium3: 0.6 },
   },
   volcanic: {
     label: 'Volcanique',
     weight: 0.12,
     popRange: [2, 150],
-    extraction: { iron_ore: 1.8, energy_crystals: 2.0, rare_gas: 0.8 },
+    extraction: { iron_ore: 1.8, energy_crystals: 2.0, rare_gas: 0.8, precious_metals: 0.9 },
   },
 };
 

@@ -15,8 +15,9 @@ import { RECIPES } from '../../data/recipes.js';
 import { RESOURCES } from '../../data/resources.js';
 import { BIOMES } from '../../data/biomes.js';
 import {
-  initPlayer, getPlayer, getShip, getCargo, cargoUsed, tierOf, hasTierAccess,
+  initPlayer, getPlayer, getShip, getFleet, getCargo, cargoUsed, tierOf, hasTierAccess,
 } from '../player/state.js';
+import { buyShip, setShipMode } from '../player/shipyard.js';
 import { previewTrade, executeTrade, refuel, buyLicence } from '../player/trade.js';
 import { previewTravel, startTravel } from '../player/travel.js';
 import { getConcession, collectConcession, upgradeConcession } from '../player/concession.js';
@@ -34,6 +35,14 @@ import { recentEvents } from '../events.js';
 // Param d'URL → id entier positif, ou null si invalide.
 function parseId(raw) {
   return /^\d+$/.test(raw) ? Number(raw) : null;
+}
+
+// shipId optionnel (body ou query) : undefined = vaisseau-amiral,
+// null = invalide.
+function parseShipId(raw) {
+  if (raw === undefined) return undefined;
+  return Number.isInteger(raw) && raw > 0 ? raw
+    : /^\d+$/.test(String(raw)) ? Number(raw) : null;
 }
 
 // Quantité de body/query → nombre fini > 0, ou null.
@@ -97,8 +106,8 @@ export function createApiRouter(db, clock) {
     ).get(id);
     if (!planet) return res.status(404).json({ error: 'planète inconnue' });
 
-    const ship = getShip(db);
-    const docked = ship.planet_id === id;
+    // À quai = au moins un vaisseau de VOTRE flotte est amarré ici.
+    const docked = getFleet(db).some((s) => s.planet_id === id);
     const payload = {
       ...planet,
       biomeLabel: BIOMES[planet.biome].label,
@@ -132,9 +141,8 @@ export function createApiRouter(db, clock) {
     }
 
     const tick = getCurrentTick(db);
-    const ship = getShip(db);
 
-    if (ship.planet_id === id) {
+    if (getFleet(db).some((s) => s.planet_id === id)) {
       const prices = planetSnapshot(db, id).map(
         ({ resource_id, name, tier, price, basePrice, stock }) =>
           ({ resource_id, name, tier, price, basePrice, stock }));
@@ -189,12 +197,14 @@ export function createApiRouter(db, clock) {
     res.json(recentEvents(db, since));
   });
 
-  // ── GET /api/player : joueur, vaisseau, cargo, concession ──────
+  // ── GET /api/player : joueur, flotte, cargo, concession ────────
   router.get('/player', (req, res) => {
     const player = getPlayer(db);
-    const ship = getShip(db);
-    const cargo = getCargo(db, ship.id).map((c) => ({
-      ...c, name: RESOURCES[c.resource_id].name,
+    const ships = getFleet(db).map((s) => ({
+      ...s,
+      classLabel: CONFIG.SHIPS.CLASSES[s.class]?.label ?? s.class,
+      cargo: getCargo(db, s.id).map((c) => ({ ...c, name: RESOURCES[c.resource_id].name })),
+      cargoUsed: cargoUsed(db, s.id),
     }));
     const concession = getConcession(db);
 
@@ -213,7 +223,10 @@ export function createApiRouter(db, clock) {
       prestige: player.prestige,
       licenceTier: player.licence_tier,
       tiers,
-      ship: { ...ship, cargo, cargoUsed: cargoUsed(db, ship.id) },
+      ships,
+      ship: ships[0], // compatibilité : le vaisseau-amiral
+      shipClasses: CONFIG.SHIPS.CLASSES,
+      maxFleet: CONFIG.SHIPS.MAX_FLEET,
       concession: concession && {
         ...concession,
         resourceName: RESOURCES[concession.resource_id].name,
@@ -222,6 +235,19 @@ export function createApiRouter(db, clock) {
       },
       tradePartners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
     });
+  });
+
+  // ── Flotte : achat et automatisation ───────────────────────────
+  router.post('/ships/buy', (req, res) => {
+    const classId = req.body?.classId;
+    if (typeof classId !== 'string') return res.status(400).json({ error: 'classId requis' });
+    answer(res, buyShip(db, classId));
+  });
+
+  router.post('/ships/:id/mode', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id de vaisseau invalide' });
+    answer(res, setShipMode(db, id, req.body?.mode));
   });
 
   // ── GET /api/knowledge : fraîcheur par système (pour la carte) ──
@@ -237,25 +263,28 @@ export function createApiRouter(db, clock) {
   router.get('/trade/preview', (req, res) => {
     const { side, resource } = req.query;
     const quantity = parseQty(req.query.qty);
-    if (!['buy', 'sell'].includes(side) || quantity === null) {
-      return res.status(400).json({ error: 'paramètres side/qty invalides' });
+    const shipId = parseShipId(req.query.shipId);
+    if (!['buy', 'sell'].includes(side) || quantity === null || shipId === null) {
+      return res.status(400).json({ error: 'paramètres side/qty/shipId invalides' });
     }
-    answer(res, previewTrade(db, { side, resourceId: resource, quantity }));
+    answer(res, previewTrade(db, { side, resourceId: resource, quantity, shipId }));
   });
 
   router.post('/trade', (req, res) => {
     const { side, resourceId } = req.body ?? {};
     const quantity = parseQty(req.body?.quantity);
-    if (!['buy', 'sell'].includes(side) || quantity === null) {
-      return res.status(400).json({ error: 'paramètres side/quantity invalides' });
+    const shipId = parseShipId(req.body?.shipId);
+    if (!['buy', 'sell'].includes(side) || quantity === null || shipId === null) {
+      return res.status(400).json({ error: 'paramètres side/quantity/shipId invalides' });
     }
-    answer(res, executeTrade(db, { side, resourceId, quantity }));
+    answer(res, executeTrade(db, { side, resourceId, quantity, shipId }));
   });
 
   router.post('/refuel', (req, res) => {
     const quantity = req.body?.quantity === undefined ? undefined : parseQty(req.body.quantity);
-    if (quantity === null) return res.status(400).json({ error: 'quantité invalide' });
-    answer(res, refuel(db, quantity));
+    const shipId = parseShipId(req.body?.shipId);
+    if (quantity === null || shipId === null) return res.status(400).json({ error: 'paramètres invalides' });
+    answer(res, refuel(db, quantity, shipId));
   });
 
   router.post('/licence', (req, res) => {
@@ -267,23 +296,26 @@ export function createApiRouter(db, clock) {
   // ── Voyage ─────────────────────────────────────────────────────
   router.get('/travel/preview', (req, res) => {
     const planetId = parseId(String(req.query.planetId ?? ''));
-    if (planetId === null) return res.status(400).json({ error: 'planetId invalide' });
-    res.json(previewTravel(db, planetId));
+    const shipId = parseShipId(req.query.shipId);
+    if (planetId === null || shipId === null) return res.status(400).json({ error: 'paramètres invalides' });
+    res.json(previewTravel(db, planetId, shipId));
   });
 
   router.post('/travel', (req, res) => {
     const planetId = req.body?.planetId;
-    if (!Number.isInteger(planetId) || planetId <= 0) {
-      return res.status(400).json({ error: 'planetId invalide' });
+    const shipId = parseShipId(req.body?.shipId);
+    if (!Number.isInteger(planetId) || planetId <= 0 || shipId === null) {
+      return res.status(400).json({ error: 'paramètres invalides' });
     }
-    answer(res, startTravel(db, planetId, getCurrentTick(db)));
+    answer(res, startTravel(db, planetId, getCurrentTick(db), shipId));
   });
 
   // ── Concession ─────────────────────────────────────────────────
   router.post('/concession/collect', (req, res) => {
     const quantity = req.body?.quantity === undefined ? undefined : parseQty(req.body.quantity);
-    if (quantity === null) return res.status(400).json({ error: 'quantité invalide' });
-    answer(res, collectConcession(db, quantity));
+    const shipId = parseShipId(req.body?.shipId);
+    if (quantity === null || shipId === null) return res.status(400).json({ error: 'paramètres invalides' });
+    answer(res, collectConcession(db, quantity, shipId));
   });
 
   router.post('/concession/upgrade', (req, res) => {
@@ -293,12 +325,13 @@ export function createApiRouter(db, clock) {
   // ── Renseignement ──────────────────────────────────────────────
   router.get('/intel/preview', (req, res) => {
     const systemId = parseId(String(req.query.systemId ?? ''));
-    if (systemId === null) return res.status(400).json({ error: 'systemId invalide' });
+    const shipId = parseShipId(req.query.shipId);
+    if (systemId === null || shipId === null) return res.status(400).json({ error: 'paramètres invalides' });
     if (!db.prepare('SELECT 1 FROM systems WHERE id = ?').get(systemId)) {
       return res.status(404).json({ error: 'système inconnu' });
     }
-    const ship = getShip(db);
-    if (ship.planet_id === null) return res.status(400).json({ error: 'vaisseau en transit' });
+    const ship = getShip(db, shipId);
+    if (!ship || ship.planet_id === null) return res.status(400).json({ error: 'vaisseau en transit' });
     const from = db.prepare('SELECT system_id FROM planets WHERE id = ?')
       .get(ship.planet_id).system_id;
     res.json({ ok: true, cost: intelCost(db, from, systemId) });
@@ -306,14 +339,15 @@ export function createApiRouter(db, clock) {
 
   router.post('/intel', (req, res) => {
     const systemId = req.body?.systemId;
-    if (!Number.isInteger(systemId) || systemId <= 0) {
-      return res.status(400).json({ error: 'systemId invalide' });
+    const shipId = parseShipId(req.body?.shipId);
+    if (!Number.isInteger(systemId) || systemId <= 0 || shipId === null) {
+      return res.status(400).json({ error: 'paramètres invalides' });
     }
     if (!db.prepare('SELECT 1 FROM systems WHERE id = ?').get(systemId)) {
       return res.status(404).json({ error: 'système inconnu' });
     }
-    const ship = getShip(db);
-    if (ship.planet_id === null) return res.status(400).json({ error: 'vaisseau en transit' });
+    const ship = getShip(db, shipId);
+    if (!ship || ship.planet_id === null) return res.status(400).json({ error: 'vaisseau en transit' });
 
     const from = db.prepare('SELECT system_id FROM planets WHERE id = ?')
       .get(ship.planet_id).system_id;
@@ -336,10 +370,12 @@ export function createApiRouter(db, clock) {
     res.json({ ok: true, speed });
   });
 
-  // Saute jusqu'à l'arrivée du vaisseau en transit.
+  // Saute jusqu'à l'arrivée du vaisseau (piloté) en transit.
   router.post('/time/skip', (req, res) => {
-    const ship = getShip(db);
-    if (ship.planet_id !== null) return res.status(400).json({ error: 'aucun voyage en cours' });
+    const shipId = parseShipId(req.body?.shipId);
+    if (shipId === null) return res.status(400).json({ error: 'shipId invalide' });
+    const ship = getShip(db, shipId);
+    if (!ship || ship.planet_id !== null) return res.status(400).json({ error: 'aucun voyage en cours' });
     const played = clock.skipUntil(ship.arrival_tick);
     res.json({ ok: true, ticksPlayed: played, tick: getCurrentTick(db) });
   });
@@ -428,8 +464,9 @@ export function createApiRouter(db, clock) {
 
   router.post('/contracts/:id/deliver', (req, res) => {
     const id = parseId(req.params.id);
-    if (id === null) return res.status(400).json({ error: 'id de contrat invalide' });
-    answer(res, deliverContract(db, id));
+    const shipId = parseShipId(req.body?.shipId);
+    if (id === null || shipId === null) return res.status(400).json({ error: 'paramètres invalides' });
+    answer(res, deliverContract(db, id, shipId));
   });
 
   // ── POST /api/admin/regenerate : nouvel univers + partie (dev) ─

@@ -96,7 +96,7 @@ export function listContracts(db) {
 // Livraison (partielle ou totale) depuis la soute, à quai au point de
 // livraison. Payée au prix du contrat ; le stock livré entre sur le marché
 // de la capitale (et nourrit donc directement le chantier naval).
-export function deliverContract(db, contractId) {
+export function deliverContract(db, contractId, shipId) {
   const contract = db.prepare("SELECT * FROM contracts WHERE id = ? AND status = 'open'")
     .get(contractId);
   if (!contract) return { ok: false, error: 'contrat introuvable ou clos' };
@@ -105,8 +105,8 @@ export function deliverContract(db, contractId) {
   const access = contractAccess(db, player, contract.faction_id);
   if (!access.ok) return access;
 
-  const ship = getShip(db);
-  if (ship.planet_id !== contract.deliver_planet_id) {
+  const ship = getShip(db, shipId);
+  if (!ship || ship.planet_id !== contract.deliver_planet_id) {
     return { ok: false, error: 'il faut être à quai au point de livraison' };
   }
   const cargo = db.prepare(

@@ -22,8 +22,9 @@ import { marketOpen, onPlayerSale } from '../factions/standing.js';
 const PRESTIGE = CONFIG.PLAYER.PRESTIGE;
 
 // Vérifications communes ; retourne le contexte si l'ordre est jouable.
-function prepareOrder(db, { side, resourceId, quantity }) {
-  const ship = getShip(db);
+function prepareOrder(db, { side, resourceId, quantity, shipId }) {
+  const ship = getShip(db, shipId);
+  if (!ship) return { ok: false, error: 'vaisseau inconnu' };
   if (ship.planet_id === null) return { ok: false, error: 'vaisseau en transit' };
   if (!RESOURCES[resourceId]) return { ok: false, error: 'ressource inconnue' };
   if (!(quantity > 0) || !Number.isFinite(quantity)) return { ok: false, error: 'quantité invalide' };
@@ -72,8 +73,8 @@ export function previewTrade(db, order) {
   };
 }
 
-export function executeTrade(db, { side, resourceId, quantity }) {
-  const p = prepareOrder(db, { side, resourceId, quantity });
+export function executeTrade(db, { side, resourceId, quantity, shipId }) {
+  const p = prepareOrder(db, { side, resourceId, quantity, shipId });
   if (!p.ok) return p;
   const { ship, planet, market } = p;
   const tick = getCurrentTick(db);
@@ -144,9 +145,9 @@ export function executeTrade(db, { side, resourceId, quantity }) {
 
 // Ravitaillement : achète du carburant du marché local directement dans le
 // réservoir. Service portuaire — pas de contrôle de tier, pas de prestige.
-export function refuel(db, quantity) {
-  const ship = getShip(db);
-  if (ship?.planet_id === null) return { ok: false, error: 'vaisseau en transit' };
+export function refuel(db, quantity, shipId) {
+  const ship = getShip(db, shipId);
+  if (!ship || ship.planet_id === null) return { ok: false, error: 'vaisseau en transit' };
 
   const need = Math.floor(ship.fuel_capacity - ship.fuel);
   if (need <= 0) return { ok: false, error: 'réservoir plein' };
@@ -173,7 +174,7 @@ export function refuel(db, quantity) {
     db.prepare('UPDATE ships SET fuel = ROUND(fuel + ?, 2) WHERE id = ?').run(qty, ship.id);
   })();
 
-  return { ok: true, quantity: qty, unitPrice: executed.unitPrice, total: executed.total, fuel: getShip(db).fuel };
+  return { ok: true, quantity: qty, unitPrice: executed.unitPrice, total: executed.total, fuel: getShip(db, ship.id).fuel };
 }
 
 // Licence commerciale : accès payant à un tier sans le prestige requis.

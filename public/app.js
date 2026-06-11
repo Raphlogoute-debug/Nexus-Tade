@@ -57,7 +57,14 @@ const state = {
   fronts: new Set(), // systèmes contestés (guerres en cours)
   wars: [],
   lastEventId: 0,
+  selectedShipId: null, // vaisseau piloté (les commandes s'appliquent à lui)
+  prevShips: new Map(), // pour détecter les arrivées
 };
+
+function selectedShip() {
+  const ships = state.player?.ships ?? [];
+  return ships.find((s) => s.id === state.selectedShipId) ?? ships[0];
+}
 
 async function api(path) {
   const res = await fetch('/api' + path);
@@ -120,8 +127,7 @@ function knowledgeAlpha(systemId) {
   return 1;
 }
 
-function shipMapPosition() {
-  const ship = state.player?.ship;
+function shipMapPosition(ship) {
   if (!ship) return null;
   if (ship.planet_id !== null) {
     const entry = state.planetIndex.get(ship.planet_id);
@@ -203,16 +209,19 @@ function drawMap() {
     }
   }
 
-  // Vaisseau du joueur : triangle cyan (+ ligne de route en transit).
-  const pos = shipMapPosition();
-  if (pos) {
+  // La flotte : un triangle cyan par vaisseau (le piloté en plein, les
+  // autres en creux), ligne de route pointillée en transit.
+  for (const ship of state.player?.ships ?? []) {
+    const pos = shipMapPosition(ship);
+    if (!pos) continue;
+    const isSelected = ship.id === selectedShip()?.id;
     if (!pos.docked) {
       const [x1, y1] = toScreen(pos.from.x, pos.from.y);
       const [x2, y2] = toScreen(pos.to.x, pos.to.y);
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
-      ctx.strokeStyle = 'rgba(83, 199, 240, 0.35)';
+      ctx.strokeStyle = isSelected ? 'rgba(83,199,240,0.4)' : 'rgba(83,199,240,0.18)';
       ctx.setLineDash([4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -224,8 +233,53 @@ function drawMap() {
     ctx.lineTo(sx + off + 5, sy + 4);
     ctx.lineTo(sx + off - 5, sy + 4);
     ctx.closePath();
-    ctx.fillStyle = '#53c7f0';
-    ctx.fill();
+    if (isSelected) {
+      ctx.fillStyle = '#53c7f0';
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = '#53c7f0';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+}
+
+// ── Barre de flotte ──────────────────────────────────────────────
+
+function renderFleetBar() {
+  const bar = $('#fleet-bar');
+  bar.innerHTML = '';
+  for (const ship of state.player?.ships ?? []) {
+    const chip = document.createElement('div');
+    chip.className = `fleet-chip ${ship.id === selectedShip()?.id ? 'selected' : ''}`;
+    const where = ship.planet_id !== null
+      ? state.planetIndex.get(ship.planet_id).planet.name
+      : `→ ${state.planetIndex.get(ship.dest_planet_id).planet.name} (t${ship.arrival_tick})`;
+    chip.innerHTML = `
+      <span class="ship-name">${ship.name}</span>
+      <span>${ship.classLabel}</span>
+      <span>${where}</span>
+      <span>${fmtQty(ship.cargoUsed)}/${fmtQty(ship.cargo_capacity)}</span>
+      <button class="mode-toggle ${ship.mode === 'auto' ? 'auto' : ''}"
+        title="Basculer manuel/automatique">${ship.mode === 'auto' ? 'AUTO' : 'MAN'}</button>
+    `;
+    chip.addEventListener('click', () => {
+      state.selectedShipId = ship.id;
+      renderFleetBar();
+      renderHudPlayer();
+      drawMap();
+      refreshPlanetPanel();
+    });
+    chip.querySelector('.mode-toggle').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const r = await apiPost(`/ships/${ship.id}/mode`, {
+        mode: ship.mode === 'auto' ? 'manual' : 'auto',
+      });
+      if (r.ok) log(`${r.name} passe en mode ${r.mode === 'auto' ? 'automatique' : 'manuel'}`);
+      await refreshPlayerAndKnowledge();
+      renderFleetBar();
+    });
+    bar.appendChild(chip);
   }
 }
 
@@ -325,14 +379,14 @@ async function renderSystemPanel(sys) {
   }
 
   // Relevé de marché à distance (si à quai quelque part).
-  if (state.player?.ship?.planet_id !== null) {
-    const preview = await api(`/intel/preview?systemId=${sys.id}`);
+  if (selectedShip()?.planet_id != null) {
+    const preview = await api(`/intel/preview?systemId=${sys.id}&shipId=${selectedShip().id}`);
     if (preview.ok && state.selectedSystem === sys && !state.selectedPlanet) {
       const btn = document.createElement('button');
       btn.className = 'action-btn';
       btn.textContent = `Acheter un relevé de marché (${fmtInt.format(preview.cost)} cr)`;
       btn.addEventListener('click', async () => {
-        const r = await apiPost('/intel', { systemId: sys.id });
+        const r = await apiPost('/intel', { systemId: sys.id, shipId: selectedShip()?.id });
         if (r.ok) {
           log(`Relevé de ${sys.name} acheté (−${fmtInt.format(r.cost)} cr)`);
           await refreshPlayerAndKnowledge();
@@ -368,6 +422,33 @@ async function refreshPlanetPanel() {
   if (planet.docked) renderDockedPanel(planet, market);
   else await renderRemotePanel(planet, market);
   panel.scrollTop = scroll;
+}
+
+// Mini-graphe de prix (60 derniers ticks) dans le formulaire d'ordre.
+function drawSparkline(points) {
+  const c = $('#spark');
+  if (!c || points.length < 2) return;
+  const g = c.getContext('2d');
+  const w = c.width;
+  const h = c.height;
+  g.clearRect(0, 0, w, h);
+  const values = points.map((p) => p.price);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  g.beginPath();
+  values.forEach((v, i) => {
+    const x = (i / (values.length - 1)) * (w - 4) + 2;
+    const y = h - 4 - ((v - min) / span) * (h - 8);
+    i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+  });
+  g.strokeStyle = '#53c7f0';
+  g.lineWidth = 1.2;
+  g.stroke();
+  g.fillStyle = '#6b7689';
+  g.font = '9px ui-monospace, monospace';
+  g.fillText(max.toFixed(1), 2, 9);
+  g.fillText(min.toFixed(1), 2, h - 1);
 }
 
 function panelHeader(planet, extra = '') {
@@ -416,11 +497,17 @@ function bindLicenceButton() {
 // — Vue à quai : marché en direct + commerce ———————————————
 
 function renderDockedPanel(planet, market) {
+  const ship = selectedShip();
+  const shipHere = ship && ship.planet_id === planet.id;
   const trends = computeTrends(market);
-  const cargoByRes = new Map(state.player.ship.cargo.map((c) => [c.resource_id, c]));
+  const cargoByRes = new Map((ship?.cargo ?? []).map((c) => [c.resource_id, c]));
 
-  let html = panelHeader(planet, '<span class="badge live">À QUAI</span>');
+  let html = panelHeader(planet, '<span class="badge live">FLOTTE À QUAI</span>');
   html += licenceBlock(planet);
+  if (!shipHere) {
+    html += `<div class="info-block">Données en direct (un de vos vaisseaux est à quai).
+      Sélectionnez un vaisseau amarré ici pour commercer.</div>`;
+  }
 
   // Concession (si c'est ici qu'elle se trouve)
   const c = state.player.concession;
@@ -432,12 +519,25 @@ function renderDockedPanel(planet, market) {
         <div class="row"><span>Extraction</span><span>+${fmtNum.format(c.rate)}/tick</span></div>
         <div class="row"><span>Entrepôt</span><span>${fmtQty(c.stockpile)} / ${fmtQty(c.cap)} (${pct} %)</span></div>
         <div class="gauge"><div style="width:${pct}%"></div></div>
-        <button class="action-btn" id="btn-collect">Charger la soute</button>
+        ${shipHere ? '<button class="action-btn" id="btn-collect">Charger la soute</button>' : ''}
         ${c.nextLevelCost !== null
           ? `<button class="action-btn" id="btn-upgrade">Améliorer (${fmtInt.format(c.nextLevelCost)} cr)</button>`
           : '<span class="badge">niveau max</span>'}
       </div>
     `;
+  }
+
+  // Chantier civil : acheter des vaisseaux sur les mondes établis.
+  if (shipHere && planet.tier >= 2) {
+    html += `<div class="section-label">Chantier civil — flotte ${state.player.ships.length}/${state.player.maxFleet}</div><div>`;
+    for (const [classId, cls] of Object.entries(state.player.shipClasses)) {
+      const disabled = state.player.credits < cls.price
+        || state.player.ships.length >= state.player.maxFleet;
+      html += `<button class="action-btn buy-ship" data-class="${classId}" ${disabled ? 'disabled' : ''}
+        title="soute ${cls.cargo} · vitesse ${cls.speed} · réservoir ${cls.fuel}">
+        ${cls.label} (${fmtQty(cls.price)} cr)</button>`;
+    }
+    html += `</div>`;
   }
 
   html += `<div class="section-label">Industries</div>`;
@@ -478,26 +578,40 @@ function renderDockedPanel(planet, market) {
   }
   html += `</table>`;
 
-  // Formulaire d'ordre (apparaît quand une ressource est sélectionnée)
-  html += `
-    <div id="trade-form" ${state.tradeSel ? '' : 'hidden'}>
-      <div class="selected-res" id="trade-res-name"></div>
-      <div style="margin:6px 0">
-        <input type="number" id="trade-qty" min="1" step="1" value="10">
-        <button class="action-btn buy" id="btn-buy">Acheter</button>
-        <button class="action-btn sell" id="btn-sell">Vendre</button>
-        <button class="action-btn" id="btn-refuel" title="Remplir le réservoir au prix du marché local">Plein</button>
+  // Formulaire d'ordre (ressource sélectionnée + vaisseau piloté à quai ici)
+  if (shipHere) {
+    html += `
+      <div id="trade-form" ${state.tradeSel ? '' : 'hidden'}>
+        <div class="selected-res" id="trade-res-name"></div>
+        <canvas id="spark" width="330" height="46"></canvas>
+        <div style="margin:6px 0">
+          <input type="number" id="trade-qty" min="1" step="1" value="10">
+          <button class="action-btn buy" id="btn-buy">Acheter</button>
+          <button class="action-btn sell" id="btn-sell">Vendre</button>
+          <button class="action-btn" id="btn-refuel" title="Remplir le réservoir au prix du marché local">Plein</button>
+        </div>
+        <div id="trade-preview"></div>
       </div>
-      <div id="trade-preview"></div>
-    </div>
-  `;
+    `;
+  }
 
   panel.innerHTML = html;
   bindBackLink();
   bindLicenceButton();
+  const shipId = ship?.id;
+
+  for (const btn of panel.querySelectorAll('.buy-ship')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost('/ships/buy', { classId: btn.dataset.class });
+      if (r.ok) log(`${r.classLabel} « ${r.name} » livré au chantier (−${fmtQty(r.price)} cr)`);
+      else log(`Achat impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
 
   $('#btn-collect')?.addEventListener('click', async () => {
-    const r = await apiPost('/concession/collect');
+    const r = await apiPost('/concession/collect', { shipId });
     if (r.ok) log(`${fmtQty(r.moved)} ${c.resourceName} chargés en soute`);
     else log(`Chargement impossible : ${r.error}`);
     await refreshPlayerAndKnowledge();
@@ -512,25 +626,28 @@ function renderDockedPanel(planet, market) {
     refreshPlanetPanel();
   });
 
-  $('#btn-refuel').addEventListener('click', async () => {
-    const r = await apiPost('/refuel');
+  $('#btn-refuel')?.addEventListener('click', async () => {
+    const r = await apiPost('/refuel', { shipId });
     if (r.ok) log(`Plein : +${fmtInt.format(r.quantity)} carburant à ${fmtPrice.format(r.unitPrice)} (−${fmtPrice.format(r.total)} cr)`);
     else log(`Ravitaillement impossible : ${r.error}`);
     await refreshPlayerAndKnowledge();
     refreshPlanetPanel();
   });
 
-  for (const row of panel.querySelectorAll('.res-row')) {
-    row.addEventListener('click', () => {
-      state.tradeSel = row.dataset.res;
-      refreshPlanetPanelForce();
-    });
+  if (shipHere) {
+    for (const row of panel.querySelectorAll('.res-row')) {
+      row.addEventListener('click', () => {
+        state.tradeSel = row.dataset.res;
+        refreshPlanetPanelForce();
+      });
+    }
   }
 
-  if (state.tradeSel) {
+  if (shipHere && state.tradeSel) {
     const res = market.prices.find((r) => r.resource_id === state.tradeSel);
     $('#trade-res-name').textContent =
       `${res.name} — marché : ${fmtPrice.format(res.price)} cr · stock ${fmtQty(res.stock)}`;
+    drawSparkline(market.history?.[state.tradeSel] ?? []);
     const qtyInput = $('#trade-qty');
     qtyInput.addEventListener('input', () => updateTradePreview());
     $('#btn-buy').addEventListener('click', () => doTrade('buy'));
@@ -554,9 +671,10 @@ function updateTradePreview() {
     const out = $('#trade-preview');
     if (!out || !state.tradeSel) return;
     if (!(qty > 0)) { out.textContent = ''; return; }
+    const shipId = selectedShip()?.id;
     const [buy, sell] = await Promise.all([
-      api(`/trade/preview?side=buy&resource=${state.tradeSel}&qty=${qty}`),
-      api(`/trade/preview?side=sell&resource=${state.tradeSel}&qty=${qty}`),
+      api(`/trade/preview?side=buy&resource=${state.tradeSel}&qty=${qty}&shipId=${shipId}`),
+      api(`/trade/preview?side=sell&resource=${state.tradeSel}&qty=${qty}&shipId=${shipId}`),
     ]);
     const line = (label, p) => p.ok
       ? `${label} : ${fmtPrice.format(p.unitPrice)}/u → ${fmtPrice.format(p.total)} cr`
@@ -570,7 +688,9 @@ function updateTradePreview() {
 async function doTrade(side) {
   const quantity = Number($('#trade-qty').value);
   if (!(quantity > 0)) return;
-  const r = await apiPost('/trade', { side, resourceId: state.tradeSel, quantity });
+  const r = await apiPost('/trade', {
+    side, resourceId: state.tradeSel, quantity, shipId: selectedShip()?.id,
+  });
   if (r.ok) {
     const verb = side === 'buy' ? 'Achat' : 'Vente';
     log(`${verb} : ${fmtQty(r.quantity)} × ${fmtPrice.format(r.unitPrice)} = ${fmtPrice.format(r.total)} cr`
@@ -620,19 +740,20 @@ async function renderRemotePanel(planet, market) {
   bindBackLink();
   bindLicenceButton();
 
-  // Bouton voyage (préparé en asynchrone).
-  const preview = await api(`/travel/preview?planetId=${planet.id}`);
+  // Bouton voyage (préparé en asynchrone) — pour le vaisseau piloté.
+  const ship = selectedShip();
+  const preview = await api(`/travel/preview?planetId=${planet.id}&shipId=${ship?.id}`);
   const slot = $('#travel-slot');
   if (!slot || state.selectedPlanet !== planet.id) return;
   if (preview.ok) {
     slot.innerHTML = `
       <button class="action-btn" id="btn-travel">
-        Voyager — ${preview.ticks} tick${preview.ticks > 1 ? 's' : ''} ·
+        ${ship.name} : voyager — ${preview.ticks} tick${preview.ticks > 1 ? 's' : ''} ·
         ${preview.fuelCost > 0 ? `${fmtInt.format(preview.fuelCost)} carburant` : 'saut local'}
       </button>
     `;
     $('#btn-travel').addEventListener('click', async () => {
-      const r = await apiPost('/travel', { planetId: planet.id });
+      const r = await apiPost('/travel', { planetId: planet.id, shipId: ship.id });
       if (r.ok) {
         log(`En route vers ${planet.name} — arrivée au tick ${r.arrivalTick}`);
         await refreshPlayerAndKnowledge();
@@ -706,7 +827,7 @@ async function renderFactionPanel(factionId) {
   }
   if (f.contractAccess) {
     for (const c of f.contracts) {
-      const here = state.player?.ship?.planet_id === c.deliver_planet_id;
+      const here = selectedShip()?.planet_id === c.deliver_planet_id;
       html += `
         <div class="info-block">
           <div class="row"><span>${c.resourceName}</span>
@@ -729,7 +850,7 @@ async function renderFactionPanel(factionId) {
   });
   for (const btn of panel.querySelectorAll('.deliver-btn')) {
     btn.addEventListener('click', async () => {
-      const r = await apiPost(`/contracts/${btn.dataset.contract}/deliver`);
+      const r = await apiPost(`/contracts/${btn.dataset.contract}/deliver`, { shipId: selectedShip()?.id });
       if (r.ok) {
         log(`Contrat : ${fmtQty(r.delivered)} livrés, +${fmtPrice.format(r.paid)} cr`
           + (r.done ? ` · contrat honoré, +${r.prestigeGained} prestige` : ''));
@@ -769,22 +890,23 @@ function renderHudState(s) {
 
 function renderHudPlayer() {
   const p = state.player;
-  if (!p) return;
+  const ship = selectedShip();
+  if (!p || !ship) return;
   $('#hud-credits').textContent = `${fmtQty(p.credits)} cr`;
   const nextTier = !p.tiers[2].unlocked ? 2 : !p.tiers[3].unlocked ? 3 : null;
   $('#hud-prestige').textContent = fmtQty(p.prestige)
     + (nextTier ? ` / ${fmtQty(p.tiers[nextTier].prestigeRequired)} (T${nextTier})` : ' (T3 ✓)');
-  $('#hud-cargo').textContent = `${fmtQty(p.ship.cargoUsed)} / ${fmtQty(p.ship.cargo_capacity)}`;
-  $('#hud-fuel').textContent = `${fmtQty(p.ship.fuel)} / ${fmtQty(p.ship.fuel_capacity)}`;
+  $('#hud-cargo').textContent = `${fmtQty(ship.cargoUsed)} / ${fmtQty(ship.cargo_capacity)}`;
+  $('#hud-fuel').textContent = `${fmtQty(ship.fuel)} / ${fmtQty(ship.fuel_capacity)}`;
 
   const loc = $('#hud-location');
-  if (p.ship.planet_id !== null) {
-    const entry = state.planetIndex.get(p.ship.planet_id);
-    loc.textContent = `À quai : ${entry.planet.name}`;
+  if (ship.planet_id !== null) {
+    const entry = state.planetIndex.get(ship.planet_id);
+    loc.textContent = `${ship.name} — à quai : ${entry.planet.name}`;
     $('#btn-skip').hidden = true;
   } else {
-    const dest = state.planetIndex.get(p.ship.dest_planet_id);
-    loc.textContent = `En transit vers ${dest.planet.name} (arrivée t${p.ship.arrival_tick})`;
+    const dest = state.planetIndex.get(ship.dest_planet_id);
+    loc.textContent = `${ship.name} — en transit vers ${dest.planet.name} (t${ship.arrival_tick})`;
     $('#btn-skip').hidden = false;
   }
 }
@@ -802,7 +924,7 @@ for (const btn of document.querySelectorAll('.time-btn[data-speed]')) {
 }
 
 $('#btn-skip').addEventListener('click', async () => {
-  const r = await apiPost('/time/skip');
+  const r = await apiPost('/time/skip', { shipId: selectedShip()?.id });
   if (r.ok) {
     log(`${r.ticksPlayed} ticks écoulés — tick ${r.tick}`);
     await fullRefresh();
@@ -815,16 +937,27 @@ $('#btn-skip').addEventListener('click', async () => {
 
 async function refreshPlayerAndKnowledge() {
   const [player, knowledge] = await Promise.all([api('/player'), api('/knowledge')]);
-  const wasInTransit = state.player?.ship?.planet_id === null;
   state.player = player;
   state.knowledge = new Map(knowledge.map((k) => [k.systemId, k.ageTicks]));
-
-  if (wasInTransit && player.ship.planet_id !== null) {
-    const entry = state.planetIndex.get(player.ship.planet_id);
-    log(`Arrivé à ${entry.planet.name}`);
-    selectSystem(entry.system);
-    selectPlanet(entry.planet.id);
+  if (!player.ships.some((s) => s.id === state.selectedShipId)) {
+    state.selectedShipId = player.ships[0]?.id ?? null;
   }
+
+  // Arrivées : journal pour toute la flotte, recentrage seulement pour
+  // le vaisseau piloté (les automatiques ne volent pas la caméra).
+  for (const ship of player.ships) {
+    const prev = state.prevShips.get(ship.id);
+    if (prev && prev.planetId === null && ship.planet_id !== null) {
+      const entry = state.planetIndex.get(ship.planet_id);
+      log(`${ship.name} arrivé à ${entry.planet.name}`);
+      if (ship.id === state.selectedShipId && ship.mode === 'manual') {
+        selectSystem(entry.system);
+        selectPlanet(entry.planet.id);
+      }
+    }
+  }
+  state.prevShips = new Map(player.ships.map((s) => [s.id, { planetId: s.planet_id }]));
+  renderFleetBar();
 }
 
 async function fullRefresh() {
@@ -913,8 +1046,8 @@ async function init() {
   window.addEventListener('resize', resizeCanvas);
 
   // On ouvre la partie là où est le vaisseau.
-  const shipPlanet = state.player.ship.planet_id;
-  if (shipPlanet !== null) {
+  const shipPlanet = selectedShip()?.planet_id;
+  if (shipPlanet != null) {
     const entry = state.planetIndex.get(shipPlanet);
     selectSystem(entry.system);
     await selectPlanet(entry.planet.id);

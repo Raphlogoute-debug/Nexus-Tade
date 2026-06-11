@@ -28,8 +28,17 @@ export function getPlayer(db) {
   return db.prepare('SELECT * FROM player WHERE id = 1').get();
 }
 
-export function getShip(db) {
+// Sans id : le vaisseau-amiral (le plus ancien). Toutes les commandes
+// joueur acceptent un shipId optionnel depuis la Phase 5 (flotte).
+export function getShip(db, shipId) {
+  if (shipId !== undefined && shipId !== null) {
+    return db.prepare('SELECT * FROM ships WHERE id = ?').get(shipId);
+  }
   return db.prepare('SELECT * FROM ships ORDER BY id LIMIT 1').get();
+}
+
+export function getFleet(db) {
+  return db.prepare('SELECT * FROM ships ORDER BY id').all();
 }
 
 export function getCargo(db, shipId) {
@@ -77,8 +86,8 @@ export function initPlayer(db) {
     db.prepare('INSERT INTO player (id, credits, prestige, licence_tier) VALUES (1, ?, 0, 1)')
       .run(PL.START_CREDITS);
     db.prepare(
-      `INSERT INTO ships (name, planet_id, cargo_capacity, fuel, fuel_capacity, speed)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ships (name, planet_id, cargo_capacity, fuel, fuel_capacity, speed, mode, class)
+       VALUES (?, ?, ?, ?, ?, ?, 'manual', 'freighter')`
     ).run(PL.SHIP.NAME, home.id, PL.SHIP.CARGO, PL.SHIP.FUEL_CAP, PL.SHIP.FUEL_CAP, PL.SHIP.SPEED);
     db.prepare(
       'INSERT INTO concession (id, planet_id, resource_id, level, stockpile) VALUES (1, ?, ?, 1, 0)'

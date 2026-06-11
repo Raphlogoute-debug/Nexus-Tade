@@ -32,6 +32,9 @@ export const CONFIG = {
       consumer_goods: 0.05,
       fuel: 0.02,
       ship_modules: 0.005, // entretien de la flotte civile
+      meds: 0.03,
+      luxury_goods: 0.012,
+      adv_components: 0.008, // infrastructures
     },
 
     // Production brute par tick = poids du biome × (BASE + COEF × √pop_M).
@@ -211,6 +214,30 @@ export const CONFIG = {
     MIN_DURATION: 40,    // pas de paix avant (ticks)
     MAX_DURATION: 220,   // épuisement : paix blanche au-delà
     EXHAUSTION: 0.35,    // flotte sous 35 % de l'initiale → capitulation
+  },
+
+  // ── Phase 5 : la flotte du joueur ────────────────────────────
+
+  SHIPS: {
+    CLASSES: {
+      courier: { label: 'Navette', cargo: 100, speed: 220, fuel: 300, price: 8000 },
+      freighter: { label: 'Cargo', cargo: 250, speed: 150, fuel: 400, price: 20000 },
+      hauler: { label: 'Vraquier', cargo: 700, speed: 100, fuel: 600, price: 60000 },
+    },
+    BUY_MIN_TIER: 2, // les chantiers civils sont sur les mondes établis
+    MAX_FLEET: 8,
+    NAMES: ['Le Colporteur', 'La Fortune', 'Le Tenace', "L'Opportun", 'Le Frugal',
+      'La Comète', "L'Habile", 'Le Discret'],
+  },
+
+  // Vaisseaux en mode automatique : même logique gloutonne que les
+  // marchands PNJ, mais les profits (et le prestige) sont à vous.
+  AUTOMATION: {
+    SCAN_RADIUS: 450,
+    MIN_MARGIN: 0.25,
+    MAX_BUY_SHARE: 0.25,
+    REFUEL_BELOW: 0.35, // plein automatique sous 35 % du réservoir
+    WANDER_P: 0.25,     // probabilité d'aller voir ailleurs si rien à faire
   },
 
   // Réputation du joueur PAR FACTION : vendre du matériel stratégique à un

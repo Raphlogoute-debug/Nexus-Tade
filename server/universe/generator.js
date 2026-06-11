@@ -212,3 +212,38 @@ export function generateUniverse(db, seed) {
   const systems = db.prepare('SELECT COUNT(*) AS n FROM systems').get().n;
   return { seed, systems, planets: planetCount };
 }
+
+// Migration douce : quand de nouvelles ressources entrent au catalogue,
+// les parties existantes reçoivent les lignes de marché manquantes
+// (production selon le biome, consommation selon la population, stock au
+// niveau cible — le marché démarre à l'équilibre et vit ensuite).
+export function ensureResourceRows(db) {
+  const missing = db.prepare(
+    `SELECT p.id AS planet_id, p.biome, p.population FROM planets p
+     WHERE (SELECT COUNT(*) FROM planet_resources pr WHERE pr.planet_id = p.id) < ?`
+  ).all(RESOURCE_IDS.length);
+  if (missing.length === 0) return 0;
+
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO planet_resources
+     (planet_id, resource_id, stock, production, consumption, price) VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  let added = 0;
+  db.transaction(() => {
+    for (const p of missing) {
+      const biome = BIOMES[p.biome];
+      const workforce = E.EXTRACTION_BASE + E.EXTRACTION_POP_COEF * Math.sqrt(p.population);
+      for (const resourceId of RESOURCE_IDS) {
+        const production = round2((biome.extraction[resourceId] ?? 0) * workforce);
+        const consumption = round2(
+          (E.POP_CONSUMPTION_PER_M[resourceId] ?? 0) * p.population);
+        const target = targetStock(consumption);
+        const price = equilibriumPrice({
+          basePrice: RESOURCES[resourceId].basePrice, stock: target, target,
+        });
+        added += insert.run(p.planet_id, resourceId, target, production, consumption, price).changes;
+      }
+    }
+  })();
+  return added;
+}

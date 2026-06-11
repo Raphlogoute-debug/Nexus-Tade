@@ -230,6 +230,8 @@ CREATE TABLE IF NOT EXISTS world_events (
 const MIGRATIONS = [
   { table: 'systems', column: 'faction_id', ddl: 'ALTER TABLE systems ADD COLUMN faction_id INTEGER' },
   { table: 'planets', column: 'supply', ddl: 'ALTER TABLE planets ADD COLUMN supply REAL NOT NULL DEFAULT 1' },
+  { table: 'ships', column: 'mode', ddl: "ALTER TABLE ships ADD COLUMN mode TEXT NOT NULL DEFAULT 'manual'" },
+  { table: 'ships', column: 'class', ddl: "ALTER TABLE ships ADD COLUMN class TEXT NOT NULL DEFAULT 'freighter'" },
 ];
 
 export function createDb(path) {

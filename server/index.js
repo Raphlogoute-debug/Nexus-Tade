@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CONFIG } from './config.js';
 import { createDb, getMeta, setMeta, getCurrentTick } from './db.js';
-import { generateUniverse } from './universe/generator.js';
+import { generateUniverse, ensureResourceRows } from './universe/generator.js';
 import { randomSeed } from './universe/rng.js';
 import { runTick } from './simulation.js';
 import { generateFactions } from './factions/generate.js';
@@ -24,6 +24,11 @@ if (getMeta(db, 'seed') === null) {
 } else {
   console.log(`✦ Univers chargé — seed ${getMeta(db, 'seed')}`);
 }
+
+// Nouvelles ressources du catalogue : les parties existantes reçoivent
+// les lignes de marché manquantes.
+const addedRows = ensureResourceRows(db);
+if (addedRows > 0) console.log(`✦ Catalogue étendu : ${addedRows} marchés ajoutés aux planètes existantes`);
 
 // Factions et marchands : créés s'ils manquent (migration des parties
 // antérieures à la Phase 3 comprise).

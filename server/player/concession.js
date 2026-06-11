@@ -27,10 +27,10 @@ export function tickConcession(db) {
 
 // Charge l'entrepôt dans la soute (coût d'acquisition nul : la revente
 // est du profit pur, donc du prestige).
-export function collectConcession(db, quantity) {
+export function collectConcession(db, quantity, shipId) {
   const c = getConcession(db);
-  const ship = getShip(db);
-  if (ship.planet_id !== c.planet_id) return { ok: false, error: 'le vaisseau n\'est pas à quai à la concession' };
+  const ship = getShip(db, shipId);
+  if (!ship || ship.planet_id !== c.planet_id) return { ok: false, error: 'le vaisseau n\'est pas à quai à la concession' };
 
   const space = ship.cargo_capacity - cargoUsed(db, ship.id);
   const moved = Math.round(Math.min(c.stockpile, space, quantity ?? Infinity) * 100) / 100;

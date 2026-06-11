@@ -11,8 +11,9 @@ const SHIP = CONFIG.PLAYER.SHIP;
 
 // Coût d'un trajet vers une planète. Un saut intra-système est quasi
 // gratuit : 1 tick, pas de carburant.
-export function previewTravel(db, destPlanetId) {
-  const ship = getShip(db);
+export function previewTravel(db, destPlanetId, shipId) {
+  const ship = getShip(db, shipId);
+  if (!ship) return { ok: false, error: 'vaisseau inconnu' };
   if (ship.planet_id === null) return { ok: false, error: 'vaisseau déjà en transit' };
 
   const dest = db.prepare('SELECT id, system_id FROM planets WHERE id = ?').get(destPlanetId);
@@ -31,11 +32,11 @@ export function previewTravel(db, destPlanetId) {
   return { ok: true, distance, ticks, fuelCost, originSystem, destSystem: dest.system_id };
 }
 
-export function startTravel(db, destPlanetId, currentTick) {
-  const preview = previewTravel(db, destPlanetId);
+export function startTravel(db, destPlanetId, currentTick, shipId) {
+  const preview = previewTravel(db, destPlanetId, shipId);
   if (!preview.ok) return preview;
 
-  const ship = getShip(db);
+  const ship = getShip(db, shipId);
   db.prepare(
     `UPDATE ships SET
        planet_id = NULL,
