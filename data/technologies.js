@@ -29,13 +29,13 @@ export const TECHNOLOGIES = {
     name: 'Métallurgie',
     cost: 12000,
     requires: null,
-    unlocks: ['steel', 'alloys'],
+    unlocks: ['steel', 'alloys', 'hull_plates'],
   },
   chemistry: {
     name: 'Chimie industrielle',
     cost: 15000,
     requires: null,
-    unlocks: ['fuel', 'polymers', 'ceramics'],
+    unlocks: ['fuel', 'polymers', 'ceramics', 'fertilizer', 'nuclear_fuel'],
   },
   biotech: {
     name: 'Biosynthèse',
@@ -47,7 +47,7 @@ export const TECHNOLOGIES = {
     name: 'Microélectronique',
     cost: 25000,
     requires: 'smelting',
-    unlocks: ['electronics'],
+    unlocks: ['electronics', 'sensors'],
   },
   manufacturing: {
     name: 'Manufacture avancée',
@@ -65,7 +65,7 @@ export const TECHNOLOGIES = {
     name: 'Industrie quantique',
     cost: 90000,
     requires: 'precision',
-    unlocks: ['antimatter', 'quantum_chips', 'jump_drives'],
+    unlocks: ['antimatter', 'quantum_chips', 'jump_drives', 'fusion_cells'],
   },
 };
 

@@ -19,6 +19,9 @@ import {
 } from '../player/state.js';
 import { buyShip, setShipMode, fleetUpkeep } from '../player/shipyard.js';
 import { createRoute, listRoutes, deleteRoute, assignRoute } from '../player/routes.js';
+import {
+  investIndustry, divestIndustry, listInvestments, industryValuation, getShare,
+} from '../player/investments.js';
 import { previewTrade, executeTrade, refuel, buyLicence } from '../player/trade.js';
 import { previewTravel, startTravel } from '../player/travel.js';
 import {
@@ -130,6 +133,9 @@ export function createApiRouter(db, clock) {
         name: RESOURCES[i.recipe_id].name,
         inputs: RECIPES[i.recipe_id].inputs,
         output: RECIPES[i.recipe_id].output,
+        valuation: industryValuation(i.recipe_id, i.rate),
+        playerShare: getShare(db, id, i.recipe_id),
+        maxShare: CONFIG.PLAYER.INVEST.MAX_SHARE,
       }));
       payload.resources = planetSnapshot(db, id);
     }
@@ -252,8 +258,28 @@ export function createApiRouter(db, clock) {
           unlocked: unlocked.has(rid),
         }));
       })(),
+      investments: listInvestments(db),
       tradePartners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
     });
+  });
+
+  // ── Parts d'industries ─────────────────────────────────────────
+  router.post('/industry/invest', (req, res) => {
+    const { recipeId, share } = req.body ?? {};
+    const shipId = parseShipId(req.body?.shipId);
+    if (typeof recipeId !== 'string' || !Number.isFinite(share) || shipId === null) {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, investIndustry(db, recipeId, share, shipId));
+  });
+
+  router.post('/industry/divest', (req, res) => {
+    const { recipeId } = req.body ?? {};
+    const shipId = parseShipId(req.body?.shipId);
+    if (typeof recipeId !== 'string' || shipId === null) {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, divestIndustry(db, recipeId, shipId));
   });
 
   // ── Technologies ───────────────────────────────────────────────

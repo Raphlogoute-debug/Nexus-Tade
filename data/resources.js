@@ -24,6 +24,12 @@ export const RESOURCES = {
   precious_metals: { name: 'Métaux précieux', tier: 'raw', basePrice: 26 },
   helium3: { name: 'Hélium-3', tier: 'raw', basePrice: 18 },
   spices: { name: 'Épices stellaires', tier: 'raw', basePrice: 22 },
+  titanium_ore: { name: 'Minerai de titane', tier: 'raw', basePrice: 14 },
+  uranium: { name: 'Uranium', tier: 'raw', basePrice: 30 },
+  biomass: { name: 'Biomasse', tier: 'raw', basePrice: 3 },
+  deuterium: { name: 'Deutérium', tier: 'raw', basePrice: 10 },
+  rare_earths: { name: 'Terres rares', tier: 'raw', basePrice: 22 },
+  gemstones: { name: 'Gemmes', tier: 'raw', basePrice: 28 },
 
   // ── Produits intermédiaires ────────────────────────────────────
   steel: { name: 'Acier', tier: 'intermediate', basePrice: 16 },
@@ -36,6 +42,10 @@ export const RESOURCES = {
   meds: { name: 'Médicaments', tier: 'intermediate', basePrice: 48 },
   antimatter: { name: 'Antimatière', tier: 'intermediate', basePrice: 130 },
   quantum_chips: { name: 'Puces quantiques', tier: 'intermediate', basePrice: 105 },
+  hull_plates: { name: 'Plaques de coque', tier: 'intermediate', basePrice: 34 },
+  nuclear_fuel: { name: 'Combustible nucléaire', tier: 'intermediate', basePrice: 62 },
+  fertilizer: { name: 'Engrais', tier: 'intermediate', basePrice: 9 },
+  fusion_cells: { name: 'Cellules à fusion', tier: 'intermediate', basePrice: 44 },
 
   // ── Produits finis ─────────────────────────────────────────────
   mech_parts: { name: 'Composants mécaniques', tier: 'finished', basePrice: 70 },
@@ -44,6 +54,7 @@ export const RESOURCES = {
   luxury_goods: { name: 'Biens de luxe', tier: 'finished', basePrice: 160 },
   adv_components: { name: 'Composants avancés', tier: 'finished', basePrice: 95 },
   jump_drives: { name: 'Moteurs à saut', tier: 'finished', basePrice: 480 },
+  sensors: { name: 'Capteurs', tier: 'finished', basePrice: 120 },
 };
 
 export const RESOURCE_IDS = Object.keys(RESOURCES);

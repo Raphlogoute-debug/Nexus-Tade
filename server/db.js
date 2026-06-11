@@ -134,6 +134,14 @@ CREATE TABLE IF NOT EXISTS player_tech (
   acquired_tick INTEGER NOT NULL
 );
 
+-- Parts du joueur dans les industries planétaires (share ∈ ]0, 0.49]).
+CREATE TABLE IF NOT EXISTS industry_shares (
+  planet_id INTEGER NOT NULL,
+  recipe_id TEXT NOT NULL,
+  share     REAL NOT NULL,
+  PRIMARY KEY (planet_id, recipe_id)
+);
+
 -- Routes logistiques : un circuit d'étapes que des vaisseaux assignés
 -- parcourent en boucle (mode 'route'), exécutant les actions de chaque
 -- étape (charger/déposer à vos concessions, acheter/vendre au marché).
@@ -350,7 +358,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
-      'route_stops', 'routes',
+      'industry_shares', 'route_stops', 'routes',
       'player_tech', 'facility_workshops', 'facility_storage', 'concessions',
       'world_events', 'faction_standing', 'war_fronts', 'wars', 'faction_relations',
       'contracts', 'traders', 'shipments', 'factions',

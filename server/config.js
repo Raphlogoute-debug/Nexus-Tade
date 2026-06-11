@@ -40,6 +40,12 @@ export const CONFIG = {
       adv_components: 0.008, // infrastructures
       antimatter: 0.004,     // réacteurs des grands mondes
       jump_drives: 0.002,    // flottes civiles haut de gamme
+      fertilizer: 0.05,      // agriculture planétaire
+      nuclear_fuel: 0.008,   // centrales
+      fusion_cells: 0.006,
+      hull_plates: 0.01,     // chantiers civils
+      sensors: 0.004,
+      gemstones: 0.006,      // luxe brut, consommé tel quel
     },
 
     // Production brute par tick = poids du biome × (BASE + COEF × √pop_M).
@@ -91,6 +97,17 @@ export const CONFIG = {
       { rate: 60, cap: 4000, cost: 8000 },
       { rate: 150, cap: 10000, cost: 30000 },
     ],
+
+    // Parts d'industries planétaires (Phase 8) : investir dans les
+    // industries des autres mondes et toucher des dividendes sur leur
+    // production RÉELLE (une industrie étranglée par les pénuries ne
+    // rapporte rien — le risque est dans le prix).
+    INVEST: {
+      DIVIDEND_MARGIN: 0.2, // part du chiffre d'affaires versée en dividendes
+      PAYBACK_TICKS: 450,   // valorisation : amortissement à plein régime
+      MAX_SHARE: 0.49,      // la planète garde le contrôle
+      RESALE: 0.9,          // décote à la revente
+    },
 
     // Industrie joueur (Phase 6) : ateliers de transformation sur site.
     FACILITIES: {

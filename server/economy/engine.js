@@ -107,7 +107,12 @@ export function runTick(db) {
     setMeta(db, 'current_tick', tick);
   })();
 
-  return { tick, planets: planets.size, durationMs: Date.now() - startedAt };
+  return {
+    tick,
+    planets: planets.size,
+    industryRuns: industryRows, // avec .runs réels du tick (dividendes)
+    durationMs: Date.now() - startedAt,
+  };
 }
 
 // Fait tourner extraction, industrie et consommation d'une planète, en
@@ -125,17 +130,19 @@ function simulatePlanet(planet) {
   // rare (loi du minimum). Les runs sont fractionnaires : on modélise des
   // flux continus, pas des lots. C'est cette règle qui fait qu'une pénurie
   // amont paralyse toute la chaîne aval — y compris les chantiers navals.
-  for (const { recipe_id, rate } of planet.industries) {
-    const recipe = RECIPES[recipe_id];
-    let runs = rate;
+  // Les runs réels sont notés sur la ligne (dividendes des actionnaires).
+  for (const industry of planet.industries) {
+    const recipe = RECIPES[industry.recipe_id];
+    let runs = industry.rate;
     for (const [inputId, qty] of Object.entries(recipe.inputs)) {
       runs = Math.min(runs, stocks.get(inputId).stock / qty);
     }
+    industry.runs = Math.max(0, runs);
     if (runs <= 0) continue;
     for (const [inputId, qty] of Object.entries(recipe.inputs)) {
       stocks.get(inputId).stock -= qty * runs;
     }
-    stocks.get(recipe_id).stock += recipe.output * runs;
+    stocks.get(industry.recipe_id).stock += recipe.output * runs;
   }
 
   // 3. Consommation civile : élastique au prix (on se rationne quand c'est

@@ -18,6 +18,10 @@ export const RECIPES = {
   meds: { inputs: { organics: 1, spices: 1 }, output: 1 },
   antimatter: { inputs: { helium3: 3, energy_crystals: 2 }, output: 1 },
   quantum_chips: { inputs: { silicon: 2, precious_metals: 1 }, output: 1 },
+  hull_plates: { inputs: { titanium_ore: 2, steel: 1 }, output: 1 },
+  nuclear_fuel: { inputs: { uranium: 2, water: 1 }, output: 1 },
+  fertilizer: { inputs: { biomass: 3 }, output: 2 },
+  fusion_cells: { inputs: { deuterium: 2, helium3: 1 }, output: 1 },
 
   // ── Finis (à partir d'intermédiaires) ──────────────────────────
   mech_parts: { inputs: { steel: 2, alloys: 1 }, output: 1 },
@@ -26,6 +30,7 @@ export const RECIPES = {
   luxury_goods: { inputs: { precious_metals: 1, polymers: 1 }, output: 1 },
   adv_components: { inputs: { ceramics: 1, electronics: 1 }, output: 1 },
   jump_drives: { inputs: { antimatter: 1, quantum_chips: 1, alloys: 2 }, output: 1 },
+  sensors: { inputs: { rare_earths: 1, electronics: 1 }, output: 1 },
 };
 
 export const RECIPE_IDS = Object.keys(RECIPES);

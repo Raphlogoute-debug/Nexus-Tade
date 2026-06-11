@@ -4,13 +4,14 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 7 terminée** — l'usine tourne sans vous : des
-**routes logistiques** (circuits d'étapes avec actions : charger/déposer à
-vos concessions, acheter/vendre au marché) parcourues en boucle par les
-vaisseaux assignés. Combinées à l'industrie de la Phase 6 (technologies,
-ateliers, concessions multiples), à la flotte sans plafond limitée par son
-entretien, et aux guerres de la Phase 4 : extraire → transformer →
-distribuer → vendre, en continu, pendant que vous chassez l'opportunité.
+**État actuel : Phase 8 terminée** — vous êtes aussi actionnaire : des
+**parts d'industries planétaires** (jusqu'à 49 %) qui versent des
+dividendes sur la production *réelle* de chaque tick — une usine
+étranglée par les pénuries ne rapporte rien. Et un catalogue porté à
+**37 ressources** (16 brutes : titane, uranium, biomasse, deutérium,
+terres rares, gemmes… chacune avec son identité de biome et ses
+débouchés). Le tout par-dessus les routes logistiques, l'industrie sur
+concession, la flotte et les guerres des phases précédentes.
 
 ## Lancer
 
@@ -191,6 +192,21 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   est la vraie limite (découvert = flotte à quai) ; testé à 100 vaisseaux
   (204 ms/tick)
 
+**Phase 8 — l'actionnaire** (`server/player/investments.js`)
+- **Parts d'industries planétaires** : à quai (tier accessible, pas sur
+  liste noire), achetez jusqu'à 49 % d'une industrie locale ; la
+  valorisation = chiffre d'affaires à plein régime × marge × amortissement
+- **Dividendes sur la production réelle** : le moteur note les runs
+  effectifs de chaque industrie (loi du minimum comprise) ; vous touchez
+  marge × prix local × votre part, chaque tick — investir dans une usine
+  bien approvisionnée (ou l'approvisionner vous-même !) fait la différence
+- Revente sur place avec décote de 10 % ; flux net (dividendes −
+  entretien de flotte) affiché au HUD
+- **6 nouvelles brutes** : minerai de titane, uranium, biomasse,
+  deutérium, terres rares, gemmes (luxe brut consommé tel quel) — et
+  leurs débouchés : plaques de coque, combustible nucléaire, engrais,
+  cellules à fusion, capteurs ; filières rattachées à l'arbre techno
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - Carte canvas : territoires de faction (halos), capitales (losanges),
   brouillard de connaissance (opacité par fraîcheur), vaisseau et ligne de
@@ -227,6 +243,7 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `POST /api/concession/collect` · `/deposit` · `/upgrade` | transferts entrepôt↔soute, amélioration |
 | `POST /api/concessions/buy` · `POST /api/concessions/:id/workshops` | nouveau site, installation d'atelier |
 | `GET/POST /api/routes` · `DELETE /api/routes/:id` · `POST /api/ships/:id/route` | routes logistiques et assignation |
+| `POST /api/industry/invest` · `/divest` | parts d'industries planétaires |
 | `POST /api/admin/regenerate` | nouvel univers + nouvelle partie (dev) |
 
 Toutes les commandes de vaisseau acceptent un `shipId` (défaut :
@@ -282,13 +299,11 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
   prix vivants seulement), voisinages stellaires précalculés et scans
   partagés pour les PNJ et la flotte.
 
-## Reste à faire (Phase 8+) — cap sur l'économie et le joueur
+## Reste à faire (Phase 9+)
 
-- **Parts d'industries planétaires** : investir dans les industries des
-  autres mondes et toucher des dividendes
-- **Encore des chaînes** : ressources exotiques rares par biome, recettes
-  alternatives (rendements différents selon la filière)
 - Contrebande (franchir blocus et listes noires), prêts de guerre
+- Recettes alternatives (rendements différents selon la filière),
+  ressources exotiques ultra-rares par biome
 - SSE à la place du polling ; état de simulation en mémoire si un jour
   les ~100 ms/tick ne suffisent plus ; événements économiques (repoussés
   à la demande du joueur)

@@ -20,6 +20,7 @@ import { tickConcessions } from './player/concession.js';
 import { tickAutoShips } from './player/automation.js';
 import { tickRouteShips } from './player/routes.js';
 import { tickFleetUpkeep } from './player/shipyard.js';
+import { tickDividends } from './player/investments.js';
 import { processArrivals } from './player/travel.js';
 import { pruneEvents } from './events.js';
 
@@ -35,6 +36,7 @@ export function runTick(db) {
     result = runEconomyTick(db);
     const tick = result.tick;
 
+    tickDividends(db, result.industryRuns);
     tickNeeds(db, tick);
     tickDiplomacy(db, tick);
     tickWars(db, tick);

@@ -22,7 +22,10 @@ import {
 } from '../server/player/concession.js';
 import { researchTech } from '../server/player/tech.js';
 import { createRoute, assignRoute, deleteRoute } from '../server/player/routes.js';
+import { investIndustry, divestIndustry } from '../server/player/investments.js';
 import { RECIPES as ALL_RECIPES } from '../data/recipes.js';
+
+const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
 import { generateFactions } from '../server/factions/generate.js';
 import { initTraders } from '../server/npc/traders.js';
 import { tickContracts, deliverContract } from '../server/factions/contracts.js';
@@ -550,13 +553,13 @@ check(['war', 'conquest', 'peace', 'seizure'].every((t) => eventTypes.has(t) || 
 
 console.log('\n■ Phase 5 — flotte, automatisation, catalogue étendu\n');
 
-// Catalogue étendu : 26 ressources, marchés présents partout.
-check(Object.keys(RESOURCES).length === 26,
-  `${Object.keys(RESOURCES).length} ressources au catalogue (10 brutes, 10 intermédiaires, 6 finies)`);
+// Catalogue étendu : 37 ressources, marchés présents partout.
+check(Object.keys(RESOURCES).length === 37,
+  `${Object.keys(RESOURCES).length} ressources au catalogue (16 brutes, 14 intermédiaires, 7 finies)`);
 const marketsPerPlanet = db.prepare(
   'SELECT MIN(n) AS mn FROM (SELECT COUNT(*) AS n FROM planet_resources GROUP BY planet_id)'
 ).get().mn;
-check(marketsPerPlanet === 26, 'chaque planète a un marché pour chacune des 26 ressources');
+check(marketsPerPlanet === 37, 'chaque planète a un marché pour chacune des 37 ressources');
 
 // Migration : une planète amputée de ses nouvelles ressources les retrouve.
 db.prepare(
@@ -564,7 +567,7 @@ db.prepare(
 ).run();
 const restored = ensureResourceRows(db);
 check(restored === 3 && db.prepare(
-  'SELECT COUNT(*) AS n FROM planet_resources WHERE planet_id = 1').get().n === 26,
+  'SELECT COUNT(*) AS n FROM planet_resources WHERE planet_id = 1').get().n === 37,
   `migration des sauvegardes : ${restored} marchés manquants recréés (production biome, conso population)`);
 
 // Achat de vaisseau au chantier d'un monde tier 2+.
@@ -737,8 +740,55 @@ const removal = deleteRoute(db, route.id);
 check(removal.ok && getShip(db, flagship.id).mode === 'manual',
   'route supprimée → vaisseau rendu au pilotage manuel');
 
+// ══ Phase 8 : nouvelles brutes + parts d'industries ══════════════
+
+console.log('\n■ Phase 8 — ressources brutes et parts d\'industries\n');
+
+// Les nouvelles brutes sont extraites quelque part dans la galaxie.
+const newRaws = ['titanium_ore', 'uranium', 'biomass', 'deuterium', 'rare_earths', 'gemstones'];
+const extractedCounts = newRaws.map((r) => db.prepare(
+  'SELECT COUNT(*) AS n FROM planet_resources WHERE resource_id = ? AND production > 0'
+).get(r).n);
+check(extractedCounts.every((n) => n > 0),
+  `6 nouvelles brutes extraites : ${newRaws.map((r, i) => `${RESOURCES[r].name} (${extractedCounts[i]} mondes)`).join(', ')}`);
+
+// Investissement : une usine de nourriture sur un monde qui extrait ses
+// propres entrées (eau + organiques) — elle tourne à plein régime.
+const target = db.prepare(
+  `SELECT pi.planet_id, pi.rate, p.name FROM planet_industries pi
+   JOIN planets p ON p.id = pi.planet_id
+   JOIN planet_resources w ON w.planet_id = pi.planet_id AND w.resource_id = 'water' AND w.production > 5
+   JOIN planet_resources o ON o.planet_id = pi.planet_id AND o.resource_id = 'organics' AND o.production > 5
+   WHERE pi.recipe_id = 'synth_food' ORDER BY pi.rate DESC LIMIT 1`
+).get();
+db.prepare('UPDATE ships SET planet_id = ?, mode = ? WHERE id = ?')
+  .run(target.planet_id, 'manual', flagship.id);
+db.prepare('UPDATE player SET credits = 400000 WHERE id = 1').run();
+
+const stake = investIndustry(db, 'synth_food', 0.4, flagship.id);
+check(stake.ok && stake.share === 0.4,
+  stake.ok && `40 % de l'usine de ${stake.name} de ${stake.planetName} acquis pour ${fmt(stake.cost)} cr`);
+
+const overCap = investIndustry(db, 'synth_food', 0.2, flagship.id);
+check(!overCap.ok && overCap.error.includes('plafonnée'),
+  `prise de contrôle impossible : « ${overCap.error} »`);
+
+// Dividendes : sur la production réelle, chaque tick. Flotte au repos —
+// seuls l'entretien (−6/tick) et les dividendes touchent les crédits.
+const creditsDiv = getPlayer(db).credits;
+for (let i = 0; i < 10; i++) runTick(db);
+const divDelta = getPlayer(db).credits - creditsDiv;
+const dividends = divDelta + 60; // on neutralise l'entretien
+check(dividends > 0,
+  `dividendes versés : +${dividends.toFixed(1)} cr en 10 ticks (production réelle × marge × 40 %)`);
+
+const divested = divestIndustry(db, 'synth_food', flagship.id);
+check(divested.ok && divested.refund > 0
+  && db.prepare('SELECT COUNT(*) AS n FROM industry_shares').get().n === 0,
+  divested.ok && `parts revendues : +${fmt(divested.refund)} cr (décote de 10 %)`);
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 7 vérifiées : économie, commerce, factions, guerres, flotte, industrie et routes OK\n');
+  : '\n✓ Phases 1 à 8 vérifiées : économie, commerce, factions, guerres, flotte, industrie, routes et investissements OK\n');
 process.exit(failures ? 1 : 0);

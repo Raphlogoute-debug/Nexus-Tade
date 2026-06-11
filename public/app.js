@@ -588,14 +588,23 @@ function renderDockedPanel(planet, market) {
     html += `</div>`;
   }
 
-  html += `<div class="section-label">Industries</div>`;
+  html += `<div class="section-label">Industries (investissables)</div>`;
   if (planet.industries.length === 0) html += `<div class="industry io">Aucune industrie locale</div>`;
   for (const ind of planet.industries) {
     const inputs = Object.entries(ind.inputs)
       .map(([rid, qty]) => `${qty} ${market.prices.find((r) => r.resource_id === rid)?.name ?? rid}`)
       .join(' + ');
+    const stakeCost = Math.round(ind.valuation * 0.1);
+    const canBuyMore = ind.playerShare < ind.maxShare - 1e-9;
     html += `<div class="industry">${ind.name}
-      <span class="io">— ${inputs} → ${ind.output} (×${fmtNum.format(ind.rate)}/tick)</span></div>`;
+      <span class="io">— ${inputs} → ${ind.output} (×${fmtNum.format(ind.rate)}/tick)</span>
+      ${ind.playerShare > 0 ? `<span class="badge live">${Math.round(ind.playerShare * 100)} %</span>` : ''}
+      ${shipHere && canBuyMore
+        ? `<button class="action-btn invest-btn" data-recipe="${ind.recipe_id}"
+            ${state.player.credits < stakeCost ? 'disabled' : ''}>+10 % (${fmtQty(stakeCost)} cr)</button>` : ''}
+      ${shipHere && ind.playerShare > 0
+        ? `<button class="action-btn divest-btn" data-recipe="${ind.recipe_id}">Revendre</button>` : ''}
+      </div>`;
   }
 
   html += `
@@ -689,6 +698,25 @@ function renderDockedPanel(planet, market) {
       const r = await apiPost(`/concessions/${btn.dataset.cid}/workshops`, { recipeId: btn.dataset.recipe });
       if (r.ok) log(`Atelier ${r.name} installé (−${fmtQty(r.cost)} cr)`);
       else log(`Installation impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+
+  for (const btn of panel.querySelectorAll('.invest-btn')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost('/industry/invest', { recipeId: btn.dataset.recipe, share: 0.1, shipId });
+      if (r.ok) log(`Parts acquises : ${Math.round(r.share * 100)} % de ${r.name} sur ${r.planetName} (−${fmtQty(r.cost)} cr)`);
+      else log(`Investissement refusé : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+  for (const btn of panel.querySelectorAll('.divest-btn')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost('/industry/divest', { recipeId: btn.dataset.recipe, shipId });
+      if (r.ok) log(`Parts de ${r.name} revendues (+${fmtQty(r.refund)} cr, décote appliquée)`);
+      else log(`Revente refusée : ${r.error}`);
       await refreshPlayerAndKnowledge();
       refreshPlanetPanelForce();
     });
@@ -1166,8 +1194,10 @@ function renderHudPlayer() {
   const p = state.player;
   const ship = selectedShip();
   if (!p || !ship) return;
+  const dividends = (p.investments ?? []).reduce((s, i) => s + i.estimatedYield, 0);
+  const flux = Math.round((dividends - p.fleetUpkeep) * 10) / 10;
   $('#hud-credits').textContent = `${fmtQty(p.credits)} cr`
-    + (p.fleetUpkeep > 0 ? ` (−${fmtNum.format(p.fleetUpkeep)}/tick)` : '');
+    + (p.fleetUpkeep > 0 || dividends > 0 ? ` (${flux >= 0 ? '+' : ''}${fmtNum.format(flux)}/tick)` : '');
   $('#hud-credits').classList.toggle('price-high', p.credits < 0);
   const nextTier = !p.tiers[2].unlocked ? 2 : !p.tiers[3].unlocked ? 3 : null;
   $('#hud-prestige').textContent = fmtQty(p.prestige)
