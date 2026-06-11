@@ -178,6 +178,52 @@ CREATE TABLE IF NOT EXISTS contracts (
   expires_tick      INTEGER NOT NULL,
   status            TEXT NOT NULL DEFAULT 'open' -- open | done | expired
 );
+
+-- ── Phase 4 : guerres ────────────────────────────────────────────
+
+-- Relations entre factions (paires a < b). war_id renseigné = en guerre.
+CREATE TABLE IF NOT EXISTS faction_relations (
+  faction_a INTEGER NOT NULL,
+  faction_b INTEGER NOT NULL,
+  relation  REAL NOT NULL,
+  war_id    INTEGER,
+  PRIMARY KEY (faction_a, faction_b)
+);
+
+CREATE TABLE IF NOT EXISTS wars (
+  id            INTEGER PRIMARY KEY,
+  attacker_id   INTEGER NOT NULL,
+  defender_id   INTEGER NOT NULL,
+  started_tick  INTEGER NOT NULL,
+  attacker_fleet0 REAL NOT NULL, -- flottes au déclenchement (seuil d'épuisement)
+  defender_fleet0 REAL NOT NULL,
+  ended_tick    INTEGER,
+  result        TEXT             -- NULL en cours | attacker | defender | peace
+);
+
+-- Le front : systèmes contestés. pressure ∈ [-1, 1], positif = l'attaquant
+-- gagne du terrain ; à ±1 le système change de mains.
+CREATE TABLE IF NOT EXISTS war_fronts (
+  war_id    INTEGER NOT NULL,
+  system_id INTEGER NOT NULL,
+  pressure  REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY (war_id, system_id)
+);
+
+-- Réputation du joueur auprès de chaque faction (-100..100).
+CREATE TABLE IF NOT EXISTS faction_standing (
+  faction_id INTEGER PRIMARY KEY,
+  standing   REAL NOT NULL DEFAULT 0
+);
+
+-- Fil d'événements du monde (guerres, conquêtes, saisies…), servi à l'UI.
+CREATE TABLE IF NOT EXISTS world_events (
+  id         INTEGER PRIMARY KEY,
+  tick       INTEGER NOT NULL,
+  type       TEXT NOT NULL,
+  message    TEXT NOT NULL,
+  faction_id INTEGER
+);
 `;
 
 // Colonnes ajoutées après coup (migration douce des parties existantes).
@@ -219,6 +265,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
+      'world_events', 'faction_standing', 'war_fronts', 'wars', 'faction_relations',
       'contracts', 'traders', 'shipments', 'factions',
       'trade_partners', 'known_prices', 'concession', 'ship_cargo', 'ships',
       'player', 'price_history', 'planet_industries', 'planet_resources',

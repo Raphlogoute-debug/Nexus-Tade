@@ -27,6 +27,9 @@ import { generateFactions } from '../factions/generate.js';
 import { initTraders } from '../npc/traders.js';
 import { marketContext } from '../economy/market.js';
 import { listContracts, deliverContract, contractAccess } from '../factions/contracts.js';
+import { activeWars, warContext } from '../factions/war.js';
+import { getStanding } from '../factions/standing.js';
+import { recentEvents } from '../events.js';
 
 // Param d'URL → id entier positif, ou null si invalide.
 function parseId(raw) {
@@ -157,8 +160,16 @@ export function createApiRouter(db, clock) {
     });
   });
 
-  // ── GET /api/state : état global ───────────────────────────────
+  // ── GET /api/state : état global (+ guerres en cours) ──────────
   router.get('/state', (req, res) => {
+    const wars = activeWars(db).map((w) => ({
+      id: w.id,
+      attacker: db.prepare('SELECT name FROM factions WHERE id = ?').get(w.attacker_id).name,
+      defender: db.prepare('SELECT name FROM factions WHERE id = ?').get(w.defender_id).name,
+      since: w.started_tick,
+      fronts: db.prepare('SELECT system_id FROM war_fronts WHERE war_id = ?')
+        .all(w.id).map((f) => f.system_id),
+    }));
     res.json({
       tick: getCurrentTick(db),
       seed: Number(getMeta(db, 'seed')),
@@ -168,7 +179,14 @@ export function createApiRouter(db, clock) {
       tickMs: CONFIG.TICK_MS,
       speed: clock.getSpeed(),
       speeds: clock.speeds,
+      wars,
     });
+  });
+
+  // ── GET /api/events?since=ID : fil d'événements du monde ────────
+  router.get('/events', (req, res) => {
+    const since = /^\d+$/.test(String(req.query.since ?? '')) ? Number(req.query.since) : 0;
+    res.json(recentEvents(db, since));
   });
 
   // ── GET /api/player : joueur, vaisseau, cargo, concession ──────
@@ -368,8 +386,30 @@ export function createApiRouter(db, clock) {
 
     const player = getPlayer(db);
     const access = contractAccess(db, player, id);
+
+    // Guerres et relations de la faction.
+    const ctx = warContext(db);
+    const war = ctx.factionWar.get(id) ?? null;
+    const factionName = db.prepare('SELECT id, name FROM factions WHERE id = ?');
+    const relations = db.prepare(
+      'SELECT * FROM faction_relations WHERE faction_a = ? OR faction_b = ?'
+    ).all(id, id).map((r) => {
+      const otherId = r.faction_a === id ? r.faction_b : r.faction_a;
+      return { faction: factionName.get(otherId), relation: r.relation, atWar: r.war_id !== null };
+    }).sort((a, b) => a.relation - b.relation);
+
     res.json({
       ...faction,
+      standing: Math.round(getStanding(db, id) * 10) / 10,
+      war: war && {
+        enemy: factionName.get(war.attacker_id === id ? war.defender_id : war.attacker_id).name,
+        since: war.started_tick,
+        fronts: db.prepare(
+          `SELECT s.name, wf.pressure FROM war_fronts wf
+           JOIN systems s ON s.id = wf.system_id WHERE wf.war_id = ?`
+        ).all(war.id),
+      },
+      relations,
       shortages: shortages.sort((a, b) => b.pressure - a.pressure),
       contractAccess: access.ok,
       contractAccessReason: access.ok ? null : access.error,

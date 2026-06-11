@@ -4,13 +4,13 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 3 terminée** — le monde est habité et dynamique :
-7 à 9 royaumes avec territoires et capitales, logistique interne par
-convois, chantiers navals qui consomment de vraies ressources (couper
-l'approvisionnement d'une capitale paralyse sa construction navale),
-marchands PNJ qui font le même métier que vous avec les mêmes règles,
-besoins des populations avec démographie, et contrats de faction (tier 4) —
-traiter avec le royaume lui-même.
+**État actuel : Phase 4 terminée** — les royaumes vivent ET se battent :
+diplomatie qui dérive, guerres déclarées sous le seuil de rupture, fronts
+qui basculent selon la force *ravitaillée*, attrition, blocus sur les
+convois, conquêtes territoriales, traités. Le joueur n'ordonne rien : il
+vend aux belligérants (contrats de guerre à premium), affame un camp,
+et gère sa réputation PAR FACTION — vendre aux deux camps se sait, et la
+douane des fronts saisit la cargaison des marchands qu'elle tient en grief.
 
 ## Lancer
 
@@ -116,6 +116,28 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   prestige) ; accessibles avec 1 500 prestige + 2 partenaires dans la
   faction — on traite avec le royaume, pas avec une planète
 
+**Phase 4 — les guerres** (`server/factions/diplomacy.js`, `war.js`, `standing.js`)
+- **Diplomatie** : relations par paire de factions qui dérivent (les
+  voisins se frottent) ; sous −60, déclaration de guerre ; fronts =
+  systèmes frontaliers des deux camps
+- **Résolution par l'économie** : force effective = flotte × disponibilité
+  (donc entretien réellement payé) ; attrition proportionnelle à la force
+  adverse ; les fronts basculent selon le rapport de force et les systèmes
+  changent de mains à ±1 ; paix par capitulation (flotte < 35 % de
+  l'initiale) ou enlisement
+- **Effort de guerre** : chantier ×2, entretien ×1,6 — la demande en
+  matériel explose, les contrats passent au premium ×1,6 avec seuil abaissé
+- **Blocus** : les convois d'un belligérant touchant un front sont
+  interceptés à 40 % — on peut affamer une capitale
+- **Réputation par faction** (−100..+100) : vendre du matériel stratégique
+  à un belligérant améliore sa réputation chez lui et la dégrade chez son
+  ennemi (renseignement) ; sous −20, saisie douanière de la cargaison
+  stratégique aux fronts ; sous −50, liste noire (marchés fermés) ; les
+  contrats exigent une réputation non hostile
+- **Fil d'événements** : guerres, conquêtes, traités, saisies — déroulés
+  dans le journal de bord, carte mise à jour (fronts en anneau rouge
+  pointillé, territoires recolorés après conquête)
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - Carte canvas : territoires de faction (halos), capitales (losanges),
   brouillard de connaissance (opacité par fraîcheur), vaisseau et ligne de
@@ -144,8 +166,9 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `POST /api/concession/collect` · `/upgrade` | chargement en soute, amélioration |
 | `GET /api/intel/preview` · `POST /api/intel` | relevé de marché d'un système distant |
 | `POST /api/time` · `POST /api/time/skip` | vitesse de simulation, saut jusqu'à l'arrivée |
-| `GET /api/factions` · `GET /api/faction/:id` | royaumes : territoire, flotte, tensions, contrats |
+| `GET /api/factions` · `GET /api/faction/:id` | royaumes : territoire, flotte, diplomatie, guerre, réputation, contrats |
 | `GET /api/contracts` · `POST /api/contracts/:id/deliver` | appels d'offres de faction et livraison |
+| `GET /api/events?since=id` | fil d'événements du monde (guerres, conquêtes, saisies) |
 | `POST /api/admin/regenerate` | nouvel univers + nouvelle partie (dev) |
 
 Validation des entrées aux frontières (400/403/404), erreurs en français.
@@ -191,16 +214,15 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
 - **L'information est une ressource** : les prix lointains sont vieux,
   incomplets ou payants.
 
-## Reste à faire (Phase 4+)
+## Reste à faire (Phase 5+)
 
-- **Guerres** : conflits entre factions résolus par l'économie (force =
-  flotte × disponibilité, attrition = demande massive, fronts = systèmes
-  contestés), blocus et embargos qui coupent convois et routes — tous les
-  leviers existent déjà (flux interceptables, chantiers dépendants,
-  readiness)
-- Réputation par faction (vendre aux deux camps devient détectable),
-  contrebande, faux pavillons
-- Flotte multiple du joueur, automatisation de routes, drones d'exploration
+- **Flotte du joueur** : plusieurs vaisseaux, routes automatisées, drones
+  d'exploration — passer de marchand à compagnie
+- **Contrebande** : franchir les blocus et les listes noires (faux
+  pavillons, intermédiaires de la Frange), piraterie sur les convois
+- **Financer un camp** : prêts de guerre, parts dans les chantiers,
+  réparations de guerre — l'embargo actif (refuser de vendre) avec effet
+  diplomatique
 - Arbre technologique : transformation sur site à la concession
 - État de simulation en mémoire + sauvegarde différée quand l'échelle
   l'exigera ; SSE à la place du polling ; graphes de prix dans l'UI

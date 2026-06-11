@@ -5,11 +5,13 @@
 // que les guerres (Phase 4) viendront encaisser.
 
 import { CONFIG } from '../config.js';
+import { warContext } from './war.js';
 
 const FT = CONFIG.FLEET;
 
 export function tickFleets(db) {
   const factions = db.prepare('SELECT * FROM factions').all();
+  const ctx = warContext(db);
   const getStock = db.prepare(
     'SELECT stock FROM planet_resources WHERE planet_id = ? AND resource_id = ?'
   );
@@ -22,9 +24,13 @@ export function tickFleets(db) {
 
   db.transaction(() => {
     for (const f of factions) {
+      const atWar = ctx.factionWar.has(f.id);
+
       // 1. Construction : cadence bornée par l'entrée la plus rare au
-      // chantier (loi du minimum, comme les industries planétaires).
-      let runs = 1;
+      // chantier (loi du minimum). En guerre, l'effort de guerre multiplie
+      // la cadence visée — donc la demande en intrants.
+      const maxRuns = atWar ? CONFIG.WAR.BUILD_MULT : 1;
+      let runs = maxRuns;
       for (const [resourceId, qty] of Object.entries(FT.BUILD)) {
         runs = Math.min(runs, getStock.get(f.capital_planet_id, resourceId).stock / qty);
       }
@@ -42,10 +48,12 @@ export function tickFleets(db) {
       }
 
       // 2. Entretien : la disponibilité suit la part d'entretien réellement
-      // payée. Une flotte privée de carburant et de pièces se dégrade.
+      // payée. Une flotte mobilisée coûte plus cher ; privée de carburant
+      // et de pièces, elle se dégrade — et perd ses fronts.
+      const upkeepMult = atWar ? CONFIG.WAR.UPKEEP_MULT : 1;
       let upkeepMet = 1;
       for (const [resourceId, perShip] of Object.entries(FT.UPKEEP_PER_SHIP)) {
-        const need = perShip * fleet;
+        const need = perShip * fleet * upkeepMult;
         if (need <= 0) continue;
         const available = getStock.get(f.capital_planet_id, resourceId).stock;
         const paid = Math.min(available, need);

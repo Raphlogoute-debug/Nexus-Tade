@@ -17,6 +17,7 @@ import {
   getPlayer, getShip, cargoUsed, adjustCredits, addPrestige, tierOf, hasTierAccess,
 } from './state.js';
 import { recordFullSnapshot } from './knowledge.js';
+import { marketOpen, onPlayerSale } from '../factions/standing.js';
 
 const PRESTIGE = CONFIG.PLAYER.PRESTIGE;
 
@@ -28,14 +29,20 @@ function prepareOrder(db, { side, resourceId, quantity }) {
   if (!(quantity > 0) || !Number.isFinite(quantity)) return { ok: false, error: 'quantité invalide' };
 
   const player = getPlayer(db);
-  const planet = db.prepare('SELECT id, name, population FROM planets WHERE id = ?')
-    .get(ship.planet_id);
+  const planet = db.prepare(
+    `SELECT p.id, p.name, p.population, s.faction_id FROM planets p
+     JOIN systems s ON s.id = p.system_id WHERE p.id = ?`
+  ).get(ship.planet_id);
   const tier = tierOf(planet.population);
   if (!hasTierAccess(player, tier)) {
     return {
       ok: false, refusedTier: tier,
       error: `marché de tier ${tier} : prestige ${CONFIG.PLAYER.TIERS[tier].prestige} ou licence requis`,
     };
+  }
+  // Liste noire : une faction que vous avez trop contrariée ferme boutique.
+  if (!marketOpen(db, planet.faction_id)) {
+    return { ok: false, error: 'votre nom est sur liste noire ici — marché fermé' };
   }
 
   const market = marketContext(db, planet.id, resourceId);
@@ -84,6 +91,7 @@ export function executeTrade(db, { side, resourceId, quantity }) {
   }
 
   let prestigeGained = 0;
+  let standingShift = null;
   let executed;
 
   db.transaction(() => {
@@ -119,6 +127,9 @@ export function executeTrade(db, { side, resourceId, quantity }) {
     }
     if (prestigeGained > 0) addPrestige(db, prestigeGained);
 
+    // Réputation : vendre du matériel stratégique à un belligérant engage.
+    if (side === 'sell') standingShift = onPlayerSale(db, tick, planet.faction_id, resourceId, quantity);
+
     recordFullSnapshot(db, planet.id, tick); // on voit ce qu'on vient de faire
   })();
 
@@ -126,6 +137,7 @@ export function executeTrade(db, { side, resourceId, quantity }) {
     ok: true, side, resourceId, quantity,
     unitPrice: executed.unitPrice, total: executed.total,
     prestigeGained: Math.round(prestigeGained * 10) / 10,
+    standingShift,
     credits: getPlayer(db).credits,
   };
 }

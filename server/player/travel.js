@@ -5,6 +5,7 @@
 import { CONFIG } from '../config.js';
 import { getShip } from './state.js';
 import { systemDistance, recordFullSnapshot, recordGossipAround } from './knowledge.js';
+import { maybeSeizeCargo } from '../factions/standing.js';
 
 const SHIP = CONFIG.PLAYER.SHIP;
 
@@ -49,7 +50,9 @@ export function startTravel(db, destPlanetId, currentTick) {
 }
 
 // Amarre les vaisseaux arrivés à destination. À quai : instantané complet
-// du marché local + rumeurs des systèmes voisins.
+// du marché local + rumeurs des systèmes voisins. Attention aux zones de
+// guerre : la douane d'un front saisit la cargaison stratégique des
+// marchands qu'elle tient en grief.
 export function processArrivals(db, tick) {
   const arrivals = db.prepare(
     'SELECT * FROM ships WHERE planet_id IS NULL AND arrival_tick <= ?'
@@ -67,6 +70,7 @@ export function processArrivals(db, tick) {
 
     recordFullSnapshot(db, ship.dest_planet_id, tick);
     recordGossipAround(db, ship.dest_system_id, tick);
+    maybeSeizeCargo(db, tick, ship, ship.dest_planet_id);
     events.push({ type: 'arrival', shipId: ship.id, planetId: ship.dest_planet_id });
   }
   return events;

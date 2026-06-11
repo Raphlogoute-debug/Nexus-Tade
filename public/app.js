@@ -54,6 +54,9 @@ const state = {
   hoverSystem: null,
   view: null,
   tradeSel: null, // ressource sélectionnée dans le marché local
+  fronts: new Set(), // systèmes contestés (guerres en cours)
+  wars: [],
+  lastEventId: 0,
 };
 
 async function api(path) {
@@ -187,6 +190,17 @@ function drawMap() {
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+
+    // Système contesté : anneau rouge — le front passe ici.
+    if (state.fronts.has(sys.id)) {
+      ctx.beginPath();
+      ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = '#f04545';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([3, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
   // Vaisseau du joueur : triangle cyan (+ ligne de route en transit).
@@ -241,8 +255,9 @@ canvas.addEventListener('mousemove', (e) => {
     const age = state.knowledge.get(sys.id);
     const info = age === undefined ? 'marchés inconnus'
       : age === 0 ? 'données fraîches' : `données : il y a ${age} ticks`;
+    const front = state.fronts.has(sys.id) ? ' — ⚔ FRONT' : '';
     tooltip.hidden = false;
-    tooltip.textContent = `${sys.name} — ${sys.planets.length} planètes — ${info}`;
+    tooltip.textContent = `${sys.name} — ${sys.planets.length} planètes — ${info}${front}`;
     tooltip.style.left = `${e.clientX - rect.left + 14}px`;
     tooltip.style.top = `${e.clientY - rect.top - 8}px`;
   } else {
@@ -639,6 +654,7 @@ async function renderFactionPanel(factionId) {
   const f = await api(`/faction/${factionId}`);
   state.selectedPlanet = null;
 
+  const standingCls = f.standing > 5 ? 'price-low' : f.standing < -5 ? 'price-high' : '';
   let html = `
     <button class="back-link" id="back-to-system">← carte</button>
     <h2 class="panel-title" style="color:${f.color}">${f.name}</h2>
@@ -648,8 +664,30 @@ async function renderFactionPanel(factionId) {
       <div class="row"><span>Flotte</span><span>${fmtInt.format(f.fleet)} vaisseaux</span></div>
       <div class="row"><span>Disponibilité</span><span>${Math.round(f.readiness * 100)} %</span></div>
       <div class="row"><span>Chantier naval</span><span>${fmtNum.format(f.fleet_progress)} / 25</span></div>
+      <div class="row"><span>Votre réputation</span><span class="${standingCls}">${f.standing > 0 ? '+' : ''}${f.standing}</span></div>
     </div>
   `;
+
+  if (f.war) {
+    html += `
+      <div class="section-label">⚔ En guerre</div>
+      <div class="info-block" style="border-color:#f04545">
+        <div class="row"><span>Contre</span><span>${f.war.enemy}</span></div>
+        <div class="row"><span>Depuis</span><span>tick ${f.war.since}</span></div>
+        ${f.war.fronts.map((fr) => `<div class="row"><span>Front : ${fr.name}</span>
+          <span>${fr.pressure > 0 ? '◀ attaque' : fr.pressure < 0 ? 'défense ▶' : 'stable'}</span></div>`).join('')}
+      </div>
+    `;
+  }
+
+  if (f.relations.length > 0) {
+    html += `<div class="section-label">Diplomatie</div>`;
+    for (const r of f.relations.slice(0, 4)) {
+      const cls = r.atWar ? 'price-high' : r.relation < -30 ? 'price-high' : r.relation > 30 ? 'price-low' : '';
+      html += `<div class="industry">${r.faction.name}
+        <span class="io ${cls}">— ${r.atWar ? 'GUERRE' : fmtNum.format(r.relation)}</span></div>`;
+    }
+  }
 
   html += `<div class="section-label">Tensions stratégiques (capitale)</div>`;
   if (f.shortages.length === 0) {
@@ -800,15 +838,42 @@ async function fullRefresh() {
   await refreshPlanetPanel();
 }
 
+// Fil d'événements du monde : guerres, conquêtes, saisies… Les
+// changements territoriaux déclenchent un rechargement de la carte.
+async function pollEvents() {
+  const events = await api(`/events?since=${state.lastEventId}`);
+  let territoryChanged = false;
+  for (const e of events) {
+    state.lastEventId = Math.max(state.lastEventId, e.id);
+    log(e.message);
+    if (['war', 'peace', 'conquest'].includes(e.type)) territoryChanged = true;
+  }
+  if (territoryChanged) {
+    const universe = await api('/universe');
+    state.universe = universe;
+    state.planetIndex.clear();
+    state.capitalSystems.clear();
+    for (const sys of universe.systems) {
+      for (const p of sys.planets) state.planetIndex.set(p.id, { planet: p, system: sys });
+    }
+    for (const f of universe.factions) {
+      state.factionById.set(f.id, f);
+      state.capitalSystems.set(state.planetIndex.get(f.capital_planet_id).system.id, f);
+    }
+  }
+}
+
 async function poll() {
   try {
     const s = await api('/state');
     const tickChanged = s.tick !== state.tick;
     state.tick = s.tick;
     state.speed = s.speed;
+    state.wars = s.wars;
+    state.fronts = new Set(s.wars.flatMap((w) => w.fronts));
     renderHudState(s);
     if (tickChanged) {
-      await refreshPlayerAndKnowledge();
+      await Promise.all([refreshPlayerAndKnowledge(), pollEvents()]);
       renderHudPlayer();
       drawMap();
       await refreshPlanetPanel();
@@ -825,6 +890,13 @@ async function init() {
   state.universe = universe;
   state.tick = s.tick;
   state.speed = s.speed;
+  state.wars = s.wars ?? [];
+  state.fronts = new Set(state.wars.flatMap((w) => w.fronts));
+
+  // On reprend le fil des événements sans rejouer tout l'historique.
+  const oldEvents = await api('/events?since=0');
+  state.lastEventId = oldEvents.reduce((m, e) => Math.max(m, e.id), 0);
+  for (const e of oldEvents.slice(-3)) log(e.message);
 
   for (const sys of universe.systems) {
     for (const p of sys.planets) state.planetIndex.set(p.id, { planet: p, system: sys });

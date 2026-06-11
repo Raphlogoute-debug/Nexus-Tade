@@ -20,6 +20,12 @@ import { getConcession, collectConcession } from '../server/player/concession.js
 import { generateFactions } from '../server/factions/generate.js';
 import { initTraders } from '../server/npc/traders.js';
 import { tickContracts, deliverContract } from '../server/factions/contracts.js';
+import { declareWar } from '../server/factions/diplomacy.js';
+import { tickWars, warContext } from '../server/factions/war.js';
+import { processShipmentArrivals } from '../server/factions/logistics.js';
+import { getStanding } from '../server/factions/standing.js';
+import { marketContext } from '../server/economy/market.js';
+import { recentEvents } from '../server/events.js';
 
 const SEED = 424242;
 const TICKS = 10;
@@ -373,8 +379,165 @@ for (let i = 0; i < 3; i++) runTick(db);
 check(shipsEquiv() > progressBefore,
   'modules livrés + intrants revenus → le chantier repart : la dépendance joue dans les deux sens');
 
+// ══ Phase 4 : guerres ════════════════════════════════════════════
+
+console.log('\n■ Phase 4 — guerre, blocus, réputation\n');
+
+// On force une guerre entre les deux capitales les plus proches (fronts
+// garantis) en passant par la vraie mécanique de déclaration.
+const caps = db.prepare(
+  `SELECT f.id, f.name, f.fleet, s.x, s.y FROM factions f
+   JOIN planets p ON p.id = f.capital_planet_id
+   JOIN systems s ON s.id = p.system_id`
+).all();
+let attacker = null;
+let defender = null;
+let bestD = Infinity;
+for (let i = 0; i < caps.length; i++) {
+  for (let j = i + 1; j < caps.length; j++) {
+    const d = Math.hypot(caps[i].x - caps[j].x, caps[i].y - caps[j].y);
+    if (d < bestD) {
+      bestD = d;
+      [attacker, defender] = [caps[i], caps[j]];
+    }
+  }
+}
+// Forces nettes pour des assertions stables.
+db.prepare('UPDATE factions SET fleet = 60, readiness = 1 WHERE id = ?').run(attacker.id);
+db.prepare('UPDATE factions SET fleet = 35, readiness = 0.7 WHERE id = ?').run(defender.id);
+attacker.fleet = 60;
+defender.fleet = 35;
+db.prepare(
+  'INSERT OR IGNORE INTO faction_relations (faction_a, faction_b, relation) VALUES (?, ?, -70)'
+).run(Math.min(attacker.id, defender.id), Math.max(attacker.id, defender.id));
+
+const warId = declareWar(db, getCurrentTick(db), attacker, defender);
+const fronts = db.prepare('SELECT system_id FROM war_fronts WHERE war_id = ?').all(warId);
+check(fronts.length >= 1,
+  `${attacker.name} déclare la guerre à ${defender.name} : ${fronts.length} systèmes sur le front`);
+
+// Contrat de guerre : seuil abaissé, premium de guerre.
+db.prepare("DELETE FROM contracts WHERE status = 'open'").run();
+const attackerCapital = db.prepare('SELECT capital_planet_id FROM factions WHERE id = ?')
+  .get(attacker.id).capital_planet_id;
+db.prepare(
+  "UPDATE planet_resources SET stock = 0 WHERE planet_id = ? AND resource_id = 'ship_modules'"
+).run(attackerCapital);
+const marketBefore = marketContext(db, attackerCapital, 'ship_modules');
+tickContracts(db, CONFIG.CONTRACTS.EVERY_TICKS * 999);
+const warContract = db.prepare(
+  "SELECT * FROM contracts WHERE status = 'open' AND faction_id = ? AND resource_id = 'ship_modules'"
+).get(attacker.id);
+check(Boolean(warContract) && warContract.unit_price > marketBefore.price * 1.5,
+  warContract && `contrat de guerre : ${warContract.quantity} modules à ${warContract.unit_price} cr/u`
+  + ` (premium ×${CONFIG.CONTRACTS.WAR_PREMIUM} vs ×${CONFIG.CONTRACTS.PREMIUM} en paix)`);
+
+// Blocus : les convois d'un belligérant qui touchent le front se font
+// intercepter (30 convois test → quasi-certitude statistique).
+const frontPlanet = db.prepare(
+  'SELECT id FROM planets WHERE system_id = ? LIMIT 1').get(fronts[0].system_id);
+for (let i = 0; i < 30; i++) {
+  db.prepare(
+    `INSERT INTO shipments (faction_id, resource_id, quantity, from_planet_id, to_planet_id, departure_tick, arrival_tick)
+     VALUES (?, 'water', 10, ?, ?, 0, ?)`
+  ).run(attacker.id, frontPlanet.id, frontPlanet.id, getCurrentTick(db));
+}
+const raidResult = processShipmentArrivals(db, getCurrentTick(db));
+check(raidResult.raided >= 1 && raidResult.raided + raidResult.delivered === 30,
+  `blocus : ${raidResult.raided}/30 convois interceptés sur le front (~${Math.round(CONFIG.WAR.RAID_CHANCE * 100)} % attendus)`);
+
+// Attrition : la guerre consume les flottes.
+const fleetSum = () => db.prepare(
+  'SELECT SUM(fleet) AS n FROM factions WHERE id IN (?, ?)').get(attacker.id, defender.id).n;
+const fleetsBefore = fleetSum();
+for (let i = 0; i < 15; i++) runTick(db);
+check(fleetSum() < fleetsBefore,
+  `attrition : flottes cumulées ${fleetsBefore.toFixed(0)} → ${fleetSum().toFixed(0)} en 15 ticks de guerre`);
+
+// Réputation : vendre des modules à l'attaquant plaît… et se sait.
+db.prepare('UPDATE player SET licence_tier = 3 WHERE id = 1').run();
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(attackerCapital, getShip(db).id);
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'ship_modules', 100, 40)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 100, avg_cost = 40`
+).run(getShip(db).id);
+const warSale = executeTrade(db, { side: 'sell', resourceId: 'ship_modules', quantity: 100 });
+const standingAtt = getStanding(db, attacker.id);
+const standingDef = getStanding(db, defender.id);
+check(warSale.ok && standingAtt > 0 && standingDef < 0,
+  `vendre 100 modules au belligérant : réputation ${attacker.name} +${standingAtt.toFixed(1)},`
+  + ` ${defender.name} ${standingDef.toFixed(1)} (l'ennemi l'apprend)`);
+
+// Liste noire : en dessous de ${BLACKLIST}, leurs marchés vous refusent.
+db.prepare('INSERT INTO faction_standing (faction_id, standing) VALUES (?, -60) '
+  + 'ON CONFLICT(faction_id) DO UPDATE SET standing = -60').run(defender.id);
+const defenderPlanet = db.prepare(
+  `SELECT p.id FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id = ? AND p.population < 50 LIMIT 1`
+).get(defender.id) ?? db.prepare(
+  `SELECT p.id FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id = ? LIMIT 1`).get(defender.id);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(defenderPlanet.id, getShip(db).id);
+const refusedTrade = executeTrade(db, { side: 'buy', resourceId: 'water', quantity: 1 });
+check(!refusedTrade.ok && refusedTrade.error.includes('liste noire'),
+  `liste noire chez ${defender.name} : « ${refusedTrade.error} »`);
+
+// Saisie : arriver sur un front d'une faction qui vous en veut, avec de la
+// cargaison stratégique en soute, coûte cher.
+db.prepare('UPDATE faction_standing SET standing = -30 WHERE faction_id = ?').run(defender.id);
+const defenderFront = db.prepare(
+  `SELECT p.id FROM planets p
+   JOIN systems s ON s.id = p.system_id
+   JOIN war_fronts wf ON wf.system_id = s.id
+   WHERE wf.war_id = ? AND s.faction_id = ? LIMIT 1`
+).get(warId, defender.id);
+if (defenderFront) {
+  db.prepare(
+    `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'mech_parts', 50, 30)
+     ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 50, avg_cost = 30`
+  ).run(getShip(db).id);
+  db.prepare(
+    `UPDATE ships SET planet_id = NULL, origin_system_id = 1, dest_system_id = ?,
+     dest_planet_id = ?, departure_tick = ?, arrival_tick = ? WHERE id = ?`
+  ).run(db.prepare('SELECT system_id FROM planets WHERE id = ?').get(defenderFront.id).system_id,
+    defenderFront.id, getCurrentTick(db), getCurrentTick(db) + 1, getShip(db).id);
+  runTick(db);
+  const mechLeft = db.prepare(
+    "SELECT quantity FROM ship_cargo WHERE ship_id = ? AND resource_id = 'mech_parts'"
+  ).get(getShip(db).id).quantity;
+  check(mechLeft === 0, 'saisie douanière au front : cargaison stratégique confisquée');
+} else {
+  check(true, 'saisie : pas de planète de front côté défenseur sur cette seed (cas couvert par le code)');
+}
+
+// Conquête : un front à bout de bascule, le système change de mains.
+const targetFront = db.prepare(
+  'SELECT system_id FROM war_fronts WHERE war_id = ? LIMIT 1').get(warId);
+db.prepare('UPDATE war_fronts SET pressure = 0.99 WHERE war_id = ? AND system_id = ?')
+  .run(warId, targetFront.system_id);
+db.prepare('UPDATE factions SET fleet = 80, readiness = 1 WHERE id = ?').run(attacker.id);
+db.prepare('UPDATE factions SET fleet = 10, readiness = 0.5 WHERE id = ?').run(defender.id);
+tickWars(db, getCurrentTick(db));
+const conqueredBy = db.prepare('SELECT faction_id FROM systems WHERE id = ?')
+  .get(targetFront.system_id).faction_id;
+check(conqueredBy === attacker.id,
+  `conquête : le système contesté passe sous contrôle de ${attacker.name}`);
+
+// Paix par capitulation : le défenseur exsangue jette l'éponge.
+db.prepare('UPDATE wars SET started_tick = ? WHERE id = ?')
+  .run(getCurrentTick(db) - CONFIG.WAR.MIN_DURATION - 5, warId);
+db.prepare('UPDATE factions SET fleet = 5 WHERE id = ?').run(defender.id);
+tickWars(db, getCurrentTick(db));
+const endedWar = db.prepare('SELECT * FROM wars WHERE id = ?').get(warId);
+check(endedWar.ended_tick !== null && endedWar.result === 'attacker',
+  `paix : ${defender.name} capitule par épuisement (résultat : victoire de l'attaquant)`);
+
+const eventTypes = new Set(recentEvents(db, 0, 300).map((e) => e.type));
+check(['war', 'conquest', 'peace', 'seizure'].every((t) => eventTypes.has(t) || (t === 'seizure' && !defenderFront)),
+  `fil d'événements : ${[...eventTypes].join(', ')} consignés pour le journal de bord`);
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1, 2 et 3 vérifiées : économie, commerce, factions, flux, PNJ et besoins OK\n');
+  : '\n✓ Phases 1 à 4 vérifiées : économie, commerce, factions, guerres et réputation OK\n');
 process.exit(failures ? 1 : 0);

@@ -11,6 +11,7 @@
 import { CONFIG } from '../config.js';
 import { targetStock } from '../economy/pricing.js';
 import { resourceDemand } from '../economy/engine.js';
+import { warContext } from './war.js';
 
 const FL = CONFIG.FLOWS;
 
@@ -89,18 +90,34 @@ export function planShipments(db, tick) {
   return created;
 }
 
-// Livraison des convois arrivés à destination.
-export function processShipmentArrivals(db, tick) {
+// Livraison des convois arrivés à destination. En temps de guerre, les
+// convois d'un belligérant qui touchent un système de front risquent
+// l'interception : la cargaison est perdue — c'est ainsi qu'un blocus
+// affame une capitale.
+export function processShipmentArrivals(db, tick, ctx = warContext(db)) {
   const arrived = db.prepare('SELECT * FROM shipments WHERE arrival_tick <= ?').all(tick);
-  if (arrived.length === 0) return 0;
+  if (arrived.length === 0) return { delivered: 0, raided: 0 };
 
   const addStock = db.prepare(
     'UPDATE planet_resources SET stock = ROUND(stock + ?, 2) WHERE planet_id = ? AND resource_id = ?'
   );
+  const systemOf = db.prepare('SELECT system_id FROM planets WHERE id = ?');
+
+  let raided = 0;
   db.transaction(() => {
-    for (const s of arrived) addStock.run(s.quantity, s.to_planet_id, s.resource_id);
+    for (const s of arrived) {
+      const atWar = ctx.factionWar.has(s.faction_id);
+      const touchesFront = atWar && (
+        ctx.frontSystems.has(systemOf.get(s.from_planet_id).system_id)
+        || ctx.frontSystems.has(systemOf.get(s.to_planet_id).system_id));
+      if (touchesFront && Math.random() < CONFIG.WAR.RAID_CHANCE) {
+        raided++;
+        continue; // convoi intercepté, rien n'arrive
+      }
+      addStock.run(s.quantity, s.to_planet_id, s.resource_id);
+    }
     db.prepare('DELETE FROM shipments WHERE arrival_tick <= ?').run(tick);
   })();
 
-  return arrived.length;
+  return { delivered: arrived.length - raided, raided };
 }

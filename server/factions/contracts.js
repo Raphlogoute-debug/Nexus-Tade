@@ -10,6 +10,8 @@ import { marketContext } from '../economy/market.js';
 import { nextPrice } from '../economy/pricing.js';
 import { getCurrentTick } from '../db.js';
 import { getPlayer, getShip, adjustCredits, addPrestige } from '../player/state.js';
+import { warContext } from './war.js';
+import { getStanding, adjustStanding } from './standing.js';
 
 const C = CONFIG.CONTRACTS;
 const STRATEGIC = Object.keys(CONFIG.FLEET.BUILD);
@@ -21,19 +23,27 @@ export function tickContracts(db, tick) {
 
   if (tick % C.EVERY_TICKS !== 0) return 0;
 
+  const ctx = warContext(db);
   let created = 0;
   for (const f of db.prepare('SELECT id, capital_planet_id FROM factions').all()) {
+    // En guerre : seuil plus nerveux, premium plus gras, plus de contrats —
+    // l'effort de guerre achète à n'importe quel prix.
+    const atWar = ctx.factionWar.has(f.id);
+    const maxOpen = atWar ? C.WAR_MAX_OPEN : C.MAX_OPEN_PER_FACTION;
+    const threshold = atWar ? C.WAR_PRESSURE : 0.4;
+    const premium = atWar ? C.WAR_PREMIUM : C.PREMIUM;
+
     const open = db.prepare(
       "SELECT COUNT(*) AS n FROM contracts WHERE faction_id = ? AND status = 'open'"
     ).get(f.id).n;
-    if (open >= C.MAX_OPEN_PER_FACTION) continue;
+    if (open >= maxOpen) continue;
 
     // La pénurie stratégique la plus criante à la capitale.
     let worst = null;
     for (const resourceId of STRATEGIC) {
       const m = marketContext(db, f.capital_planet_id, resourceId);
       const pressure = (m.target - m.stock) / m.target;
-      if (pressure > 0.4 && (!worst || pressure > worst.pressure)) {
+      if (pressure > threshold && (!worst || pressure > worst.pressure)) {
         worst = { resourceId, pressure, market: m };
       }
     }
@@ -41,7 +51,7 @@ export function tickContracts(db, tick) {
 
     const gap = worst.market.target - worst.market.stock;
     const quantity = Math.round(Math.min(600, Math.max(80, gap * 2)));
-    const unitPrice = Math.round(worst.market.price * C.PREMIUM * 100) / 100;
+    const unitPrice = Math.round(worst.market.price * premium * 100) / 100;
     db.prepare(
       `INSERT INTO contracts (faction_id, resource_id, quantity, remaining, unit_price,
         deliver_planet_id, expires_tick) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -65,6 +75,10 @@ export function contractAccess(db, player, factionId) {
   ).get(factionId).n;
   if (partners < C.PARTNERS_REQUIRED) {
     return { ok: false, error: `${C.PARTNERS_REQUIRED} partenaires commerciaux requis dans la faction (vous : ${partners})` };
+  }
+  const standing = getStanding(db, factionId);
+  if (standing < CONFIG.STANDING.CONTRACT_MIN) {
+    return { ok: false, error: `réputation trop dégradée auprès de cette faction (${Math.round(standing)})` };
   }
   return { ok: true, partners };
 }
@@ -127,6 +141,16 @@ export function deliverContract(db, contractId) {
         status = CASE WHEN remaining - ? <= 0 THEN 'done' ELSE 'open' END WHERE id = ?`
     ).run(delivered, delivered, contractId);
     if (done) addPrestige(db, C.COMPLETION_PRESTIGE);
+
+    // Réputation : livrer l'effort de guerre engage — et l'ennemi le saura.
+    const ctx = warContext(db);
+    const enemyId = ctx.enemyOf(contract.faction_id);
+    if (enemyId !== null) {
+      const gain = delivered * CONFIG.STANDING.STRATEGIC_PER_UNIT;
+      adjustStanding(db, contract.faction_id, gain);
+      adjustStanding(db, enemyId, -gain * CONFIG.STANDING.ENEMY_LEAK);
+    }
+    if (done) adjustStanding(db, contract.faction_id, CONFIG.STANDING.CONTRACT_BONUS);
   })();
 
   return {

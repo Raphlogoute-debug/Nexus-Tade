@@ -181,5 +181,46 @@ export const CONFIG = {
     PRESTIGE_REQUIRED: 1500,
     PARTNERS_REQUIRED: 2,   // partenaires commerciaux dans la faction
     COMPLETION_PRESTIGE: 60,
+    // En guerre, le royaume achète plus, plus cher, plus souvent.
+    WAR_PRESSURE: 0.2,      // seuil de pénurie déclencheur (0.4 en paix)
+    WAR_PREMIUM: 1.6,
+    WAR_MAX_OPEN: 4,
+  },
+
+  // ── Phase 4 : guerres ────────────────────────────────────────
+
+  DIPLOMACY: {
+    EVERY_TICKS: 5,
+    START_RELATION: [-30, 40],  // relation initiale entre deux factions
+    DRIFT: 1.6,                 // dérive aléatoire par cycle diplomatique
+    NEIGHBOR_BIAS: -0.5,        // les voisins se frottent (dérive négative)
+    NEIGHBOR_RADIUS: 800,       // capitales plus proches que ça = rivales
+    WAR_THRESHOLD: -60,         // relation en dessous → déclaration de guerre
+    PEACE_RELATION: -15,        // relation après un traité de paix
+    MIN_FLEET_FOR_WAR: 20,
+  },
+
+  WAR: {
+    ATTRITION: 0.004,    // pertes par tick ∝ force effective ennemie
+    FRONT_RADIUS: 340,   // distance max entre systèmes pour former un front
+    MAX_FRONTS: 5,
+    FRONT_RATE: 0.04,    // vitesse de bascule d'un front selon le rapport de force
+    RAID_CHANCE: 0.4,    // convois touchant un système de front : interceptés
+    BUILD_MULT: 2,       // effort de guerre : le chantier tourne plus fort
+    UPKEEP_MULT: 1.6,    // une flotte mobilisée coûte plus cher
+    MIN_DURATION: 40,    // pas de paix avant (ticks)
+    MAX_DURATION: 220,   // épuisement : paix blanche au-delà
+    EXHAUSTION: 0.35,    // flotte sous 35 % de l'initiale → capitulation
+  },
+
+  // Réputation du joueur PAR FACTION : vendre du matériel stratégique à un
+  // belligérant se sait — et son ennemi s'en souvient.
+  STANDING: {
+    STRATEGIC_PER_UNIT: 0.05, // réputation gagnée par unité stratégique vendue (en guerre)
+    ENEMY_LEAK: 0.6,          // fraction que l'ennemi apprend (et vous reproche)
+    CONTRACT_BONUS: 8,        // bonus de réputation par contrat honoré
+    CONTRACT_MIN: -10,        // réputation min pour accéder aux contrats
+    SEIZURE: -20,             // en dessous, cargaison stratégique saisie aux fronts
+    BLACKLIST: -50,           // en dessous, les marchés de la faction vous refusent
   },
 };
