@@ -4,11 +4,13 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 2 terminée** — au monde vivant de la Phase 1 (univers
-procédural + économie offre/demande qui tourne en continu) s'ajoute le
-joueur : crédits, vaisseau, voyage en temps réel, achat/vente qui déplacent
-les prix, progression par prestige et tiers de marché, connaissance
-périssable des marchés, concession améliorable, contrôles du temps.
+**État actuel : Phase 3 terminée** — le monde est habité et dynamique :
+7 à 9 royaumes avec territoires et capitales, logistique interne par
+convois, chantiers navals qui consomment de vraies ressources (couper
+l'approvisionnement d'une capitale paralyse sa construction navale),
+marchands PNJ qui font le même métier que vous avec les mêmes règles,
+besoins des populations avec démographie, et contrats de faction (tier 4) —
+traiter avec le royaume lui-même.
 
 ## Lancer
 
@@ -91,12 +93,37 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 - Horloge contrôlable : pause / ×1 / ×2 / ×4, saut jusqu'à l'arrivée
   (persisté en DB)
 
+**Phase 3 — le monde habité** (`server/factions/`, `server/npc/`)
+- **Factions** : 6-9 royaumes générés (capitale = grand monde, territoire =
+  systèmes dans le rayon de la capitale, le reste = Frange indépendante),
+  visibles sur la carte (halos colorés, losange sur les capitales)
+- **Logistique interne** : des convois (flux statistiques datés, pas des
+  vaisseaux simulés un à un) équilibrent les marchés membres — le stock
+  voyage réellement, donc il sera interceptable (blocus, piraterie)
+- **Chantiers navals** : chaque capitale construit sa flotte en consommant
+  modules, pièces et carburant SUR SON MARCHÉ — loi du minimum : couper
+  l'approvisionnement paralyse la construction et fait chuter la
+  disponibilité de la flotte (vérifié par `npm run verify`). C'est le
+  levier que les guerres de la Phase 4 viendront encaisser.
+- **Marchands PNJ** (~1 pour 2 systèmes) : achètent bas, voyagent, vendent
+  haut, sur les mêmes marchés et avec le même impact prix que le joueur ;
+  ils resserrent les écarts et comblent partiellement les ruptures
+- **Besoins** : demande civile élastique aux prix (on se rationne quand
+  c'est cher), indice d'approvisionnement par planète (besoins vitaux),
+  démographie qui suit — une planète affamée se vide
+- **Contrats de faction (tier 4)** : une pénurie stratégique durable à la
+  capitale déclenche un appel d'offres (gros volume, prix premium, gros
+  prestige) ; accessibles avec 1 500 prestige + 2 partenaires dans la
+  faction — on traite avec le royaume, pas avec une planète
+
 **UI** (`public/`, vanilla, zéro dépendance)
-- Carte canvas : brouillard de connaissance (opacité par fraîcheur),
-  vaisseau et ligne de route, infobulles
+- Carte canvas : territoires de faction (halos), capitales (losanges),
+  brouillard de connaissance (opacité par fraîcheur), vaisseau et ligne de
+  route, infobulles
 - Panneau : marché en direct à quai (commerce au clic, formulaire d'ordre
   avec aperçu), données datées à distance, boutons voyage/licence/relevé,
-  bloc concession, journal de bord
+  bloc concession, panneau faction (flotte, tensions stratégiques,
+  contrats avec livraison), journal de bord
 - HUD : crédits, prestige (et prochain palier), soute, carburant, position,
   contrôles du temps
 
@@ -117,6 +144,8 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `POST /api/concession/collect` · `/upgrade` | chargement en soute, amélioration |
 | `GET /api/intel/preview` · `POST /api/intel` | relevé de marché d'un système distant |
 | `POST /api/time` · `POST /api/time/skip` | vitesse de simulation, saut jusqu'à l'arrivée |
+| `GET /api/factions` · `GET /api/faction/:id` | royaumes : territoire, flotte, tensions, contrats |
+| `GET /api/contracts` · `POST /api/contracts/:id/deliver` | appels d'offres de faction et livraison |
 | `POST /api/admin/regenerate` | nouvel univers + nouvelle partie (dev) |
 
 Validation des entrées aux frontières (400/403/404), erreurs en français.
@@ -144,27 +173,34 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
 
 ## Notes de conception
 
-- **Marchés fermés entre eux** : sans PNJ marchands (Phase 3), les
-  déséquilibres entre planètes persistent — ce sont les gradients de prix
-  que le joueur apprend à exploiter. La concurrence viendra les lui disputer.
+- **Une seule économie pour tout le monde** : joueur, marchands PNJ,
+  convois de faction, chantiers navals et contrats passent par les mêmes
+  marchés et les mêmes règles d'impact prix (`economy/market.js`). C'est ce
+  qui rend les chaînes de dépendance réelles : un royaume privé de modules
+  ne construit plus, quelle que soit l'origine de la rupture.
+- **Simulation pyramidale** : agents pleins (marchands nommés) pour ce qui
+  se voit, flux statistiques (convois) pour la masse, loi du minimum
+  partout. Des milliers de vaisseaux *implicites* sans en simuler un seul
+  inutilement.
 - **Petits marchés peu profonds** : l'impact prix limite naturellement les
   volumes sur les avant-postes ; accéder aux tiers supérieurs, c'est
   accéder à la profondeur. La progression d'échelle est économique, pas
-  artificielle.
+  artificielle. Le modèle de prix étant invariant d'échelle (ratios), les
+  volumes pourront croître de plusieurs ordres de grandeur sans changer la
+  formule.
 - **L'information est une ressource** : les prix lointains sont vieux,
-  incomplets ou payants. Le modèle de prix étant invariant d'échelle
-  (ratios), les volumes pourront croître de plusieurs ordres de grandeur
-  sans changer la formule.
+  incomplets ou payants.
 
-## Reste à faire (Phase 3+)
+## Reste à faire (Phase 4+)
 
-- Factions et royaumes : territoires, réputation par faction, contrats en
-  gros au niveau de la faction (tier 4)
-- Marchands PNJ et flux commerciaux statistiques (simulation pyramidale :
-  agents pleins / flux / matérialisation à la demande) ; état de simulation
-  en mémoire avec sauvegarde différée
-- Guerres et embargos comme chocs économiques exploitables
-- Flotte multiple, automatisation de routes, drones d'exploration
-- Arbre technologique : transformation sur site à la concession (Phase 4)
-- Graphes de prix dans l'UI (l'historique est déjà exposé), SSE à la place
-  du polling
+- **Guerres** : conflits entre factions résolus par l'économie (force =
+  flotte × disponibilité, attrition = demande massive, fronts = systèmes
+  contestés), blocus et embargos qui coupent convois et routes — tous les
+  leviers existent déjà (flux interceptables, chantiers dépendants,
+  readiness)
+- Réputation par faction (vendre aux deux camps devient détectable),
+  contrebande, faux pavillons
+- Flotte multiple du joueur, automatisation de routes, drones d'exploration
+- Arbre technologique : transformation sur site à la concession
+- État de simulation en mémoire + sauvegarde différée quand l'échelle
+  l'exigera ; SSE à la place du polling ; graphes de prix dans l'UI

@@ -23,6 +23,10 @@ import { getConcession, collectConcession, upgradeConcession } from '../player/c
 import {
   knownMarket, knowledgeSummary, intelCost, recordIntel, systemDistance,
 } from '../player/knowledge.js';
+import { generateFactions } from '../factions/generate.js';
+import { initTraders } from '../npc/traders.js';
+import { marketContext } from '../economy/market.js';
+import { listContracts, deliverContract, contractAccess } from '../factions/contracts.js';
 
 // Param d'URL → id entier positif, ou null si invalide.
 function parseId(raw) {
@@ -44,11 +48,14 @@ function answer(res, result) {
 export function createApiRouter(db, clock) {
   const router = Router();
 
-  // ── GET /api/universe : systèmes, planètes, positions ──────────
+  // ── GET /api/universe : systèmes, planètes, positions, factions ─
   router.get('/universe', (req, res) => {
-    const systems = db.prepare('SELECT id, name, x, y FROM systems ORDER BY id').all();
+    const systems = db.prepare('SELECT id, name, x, y, faction_id FROM systems ORDER BY id').all();
     const planets = db.prepare(
       'SELECT id, system_id, name, biome, population FROM planets ORDER BY id'
+    ).all();
+    const factions = db.prepare(
+      'SELECT id, name, color, capital_planet_id FROM factions ORDER BY id'
     ).all();
 
     const bySystem = new Map(systems.map((s) => [s.id, { ...s, planets: [] }]));
@@ -67,6 +74,7 @@ export function createApiRouter(db, clock) {
       seed: Number(getMeta(db, 'seed')),
       mapSize: CONFIG.UNIVERSE.MAP_SIZE,
       systems: [...bySystem.values()],
+      factions,
     });
   });
 
@@ -76,8 +84,13 @@ export function createApiRouter(db, clock) {
     if (id === null) return res.status(400).json({ error: 'id de planète invalide' });
 
     const planet = db.prepare(
-      `SELECT p.id, p.name, p.biome, p.population, p.system_id, s.name AS system_name
-       FROM planets p JOIN systems s ON s.id = p.system_id WHERE p.id = ?`
+      `SELECT p.id, p.name, p.biome, p.population, p.supply, p.system_id,
+              s.name AS system_name, s.faction_id,
+              f.name AS faction_name, f.color AS faction_color
+       FROM planets p
+       JOIN systems s ON s.id = p.system_id
+       LEFT JOIN factions f ON f.id = s.faction_id
+       WHERE p.id = ?`
     ).get(id);
     if (!planet) return res.status(404).json({ error: 'planète inconnue' });
 
@@ -313,6 +326,72 @@ export function createApiRouter(db, clock) {
     res.json({ ok: true, ticksPlayed: played, tick: getCurrentTick(db) });
   });
 
+  // ── Factions ───────────────────────────────────────────────────
+  router.get('/factions', (req, res) => {
+    const factions = db.prepare(
+      `SELECT f.*, p.name AS capital_name,
+              (SELECT COUNT(*) FROM systems s WHERE s.faction_id = f.id) AS systems,
+              (SELECT COUNT(*) FROM planets pl JOIN systems s ON s.id = pl.system_id
+                WHERE s.faction_id = f.id) AS planets
+       FROM factions f JOIN planets p ON p.id = f.capital_planet_id ORDER BY f.id`
+    ).all();
+    res.json(factions);
+  });
+
+  router.get('/faction/:id', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id de faction invalide' });
+    const faction = db.prepare(
+      `SELECT f.*, p.name AS capital_name, p.id AS capital_id,
+              (SELECT COUNT(*) FROM systems s WHERE s.faction_id = f.id) AS systems,
+              (SELECT COUNT(*) FROM planets pl JOIN systems s ON s.id = pl.system_id
+                WHERE s.faction_id = f.id) AS planets
+       FROM factions f JOIN planets p ON p.id = f.capital_planet_id WHERE f.id = ?`
+    ).get(id);
+    if (!faction) return res.status(404).json({ error: 'faction inconnue' });
+
+    // Tensions stratégiques à la capitale (info publique : les pénuries
+    // d'un royaume se savent — c'est ce qui attire les marchands).
+    const shortages = [];
+    for (const resourceId of Object.keys(CONFIG.FLEET.BUILD)) {
+      const m = marketContext(db, faction.capital_planet_id, resourceId);
+      const pressure = (m.target - m.stock) / m.target;
+      if (pressure > 0.25) {
+        shortages.push({
+          resource_id: resourceId,
+          name: RESOURCES[resourceId].name,
+          pressure: Math.round(pressure * 100) / 100,
+          price: m.price,
+        });
+      }
+    }
+
+    const player = getPlayer(db);
+    const access = contractAccess(db, player, id);
+    res.json({
+      ...faction,
+      shortages: shortages.sort((a, b) => b.pressure - a.pressure),
+      contractAccess: access.ok,
+      contractAccessReason: access.ok ? null : access.error,
+      contracts: listContracts(db).filter((c) => c.faction_id === id),
+    });
+  });
+
+  // ── Contrats ───────────────────────────────────────────────────
+  router.get('/contracts', (req, res) => {
+    const player = getPlayer(db);
+    res.json(listContracts(db).map((c) => ({
+      ...c,
+      access: contractAccess(db, player, c.faction_id).ok,
+    })));
+  });
+
+  router.post('/contracts/:id/deliver', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id de contrat invalide' });
+    answer(res, deliverContract(db, id));
+  });
+
   // ── POST /api/admin/regenerate : nouvel univers + partie (dev) ─
   router.post('/admin/regenerate', (req, res) => {
     let seed = req.body?.seed;
@@ -326,9 +405,11 @@ export function createApiRouter(db, clock) {
 
     wipe(db);
     const result = generateUniverse(db, seed);
+    const factions = generateFactions(db);
+    const traders = initTraders(db);
     const game = initPlayer(db);
     setMeta(db, 'time_speed', clock.getSpeed());
-    res.json({ ...result, ...game });
+    res.json({ ...result, ...factions, ...traders, ...game });
   });
 
   return router;

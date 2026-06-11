@@ -18,6 +18,7 @@ import { CONFIG } from '../config.js';
 import { RESOURCES, RESOURCE_IDS } from '../../data/resources.js';
 import { RECIPES } from '../../data/recipes.js';
 import { targetStock, nextPrice } from './pricing.js';
+import { compressionFactor, VITAL_SET } from './needs.js';
 import { getCurrentTick, setMeta } from '../db.js';
 
 // Demande totale par tick d'une ressource sur une planète : consommation
@@ -42,16 +43,21 @@ export function runTick(db) {
     'SELECT planet_id, recipe_id, rate FROM planet_industries'
   ).all();
 
-  // Regroupement par planète : chaque planète est un marché fermé en Phase 1.
+  // Regroupement par planète (les échanges inter-planétaires passent par
+  // les convois et les marchands, traités hors du tick économique local).
   const planets = new Map();
   for (const row of resourceRows) {
     if (!planets.has(row.planet_id)) {
-      planets.set(row.planet_id, { resources: new Map(), industries: [] });
+      planets.set(row.planet_id, { resources: new Map(), industries: [], supply: 1 });
     }
     planets.get(row.planet_id).resources.set(row.resource_id, row);
   }
   for (const row of industryRows) {
     planets.get(row.planet_id).industries.push(row);
+  }
+  for (const row of db.prepare('SELECT id, supply FROM planets').all()) {
+    const p = planets.get(row.id);
+    if (p) p.supply = row.supply;
   }
 
   const updateResource = db.prepare(
@@ -61,10 +67,16 @@ export function runTick(db) {
     'INSERT INTO price_history (planet_id, resource_id, tick, price) VALUES (?, ?, ?, ?)'
   );
   const pruneHistory = db.prepare('DELETE FROM price_history WHERE tick <= ?');
+  const updateSupply = db.prepare('UPDATE planets SET supply = ? WHERE id = ?');
 
   db.transaction(() => {
-    for (const planet of planets.values()) {
-      simulatePlanet(planet);
+    for (const [planetId, planet] of planets) {
+      // L'indice d'approvisionnement suit la part des besoins vitaux servis.
+      const vitalMet = simulatePlanet(planet);
+      const supply = Math.round(
+        (planet.supply + CONFIG.NEEDS.SUPPLY_EMA * (vitalMet - planet.supply)) * 1000
+      ) / 1000;
+      if (supply !== planet.supply) updateSupply.run(supply, planetId);
 
       for (const row of planet.resources.values()) {
         // Demande totale par tick = civile + besoins industriels à plein
@@ -89,8 +101,9 @@ export function runTick(db) {
   return { tick, planets: planets.size, durationMs: Date.now() - startedAt };
 }
 
-// Fait tourner extraction, industrie et consommation d'une planète,
-// en mutant les stocks en mémoire.
+// Fait tourner extraction, industrie et consommation d'une planète, en
+// mutant les stocks en mémoire. Retourne la part des besoins vitaux servis
+// (0..1) — l'indice d'approvisionnement s'en nourrit.
 function simulatePlanet(planet) {
   const stocks = planet.resources;
 
@@ -101,7 +114,8 @@ function simulatePlanet(planet) {
 
   // 2. Industrie : le nombre de runs réels est borné par l'entrée la plus
   // rare (loi du minimum). Les runs sont fractionnaires : on modélise des
-  // flux continus, pas des lots.
+  // flux continus, pas des lots. C'est cette règle qui fait qu'une pénurie
+  // amont paralyse toute la chaîne aval — y compris les chantiers navals.
   for (const { recipe_id, rate } of planet.industries) {
     const recipe = RECIPES[recipe_id];
     let runs = rate;
@@ -115,10 +129,23 @@ function simulatePlanet(planet) {
     stocks.get(recipe_id).stock += recipe.output * runs;
   }
 
-  // 3. Consommation civile (bornée par le stock disponible)
+  // 3. Consommation civile : élastique au prix (on se rationne quand c'est
+  // cher), bornée par le stock. On mesure au passage la satisfaction des
+  // besoins vitaux.
+  let vitalWanted = 0;
+  let vitalTaken = 0;
   for (const row of stocks.values()) {
-    row.stock = Math.max(0, row.stock - row.consumption);
+    if (row.consumption <= 0) continue;
+    const wanted = row.consumption
+      * compressionFactor(row.price, RESOURCES[row.resource_id].basePrice);
+    const taken = Math.min(row.stock, wanted);
+    row.stock -= taken;
+    if (VITAL_SET.has(row.resource_id)) {
+      vitalWanted += wanted;
+      vitalTaken += taken;
+    }
   }
+  return vitalWanted > 0 ? vitalTaken / vitalWanted : 1;
 }
 
 function round2(n) {

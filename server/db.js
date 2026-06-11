@@ -126,12 +126,74 @@ CREATE TABLE IF NOT EXISTS trade_partners (
   planet_id        INTEGER PRIMARY KEY,
   first_trade_tick INTEGER NOT NULL
 );
+
+-- ── Phase 3 : factions, flux, PNJ ────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS factions (
+  id                INTEGER PRIMARY KEY,
+  name              TEXT NOT NULL,
+  color             TEXT NOT NULL,
+  capital_planet_id INTEGER NOT NULL,
+  fleet             REAL NOT NULL,
+  fleet_progress    REAL NOT NULL DEFAULT 0, -- chantier naval (ticks cumulés)
+  readiness         REAL NOT NULL DEFAULT 1  -- disponibilité de la flotte (0..1)
+);
+
+-- Convois logistiques : des flux datés, pas des vaisseaux individuels.
+-- Le stock part de l'origine au départ et arrive à destination plus tard —
+-- interceptable (blocus, piraterie) dans les phases suivantes.
+CREATE TABLE IF NOT EXISTS shipments (
+  id             INTEGER PRIMARY KEY,
+  faction_id     INTEGER,
+  resource_id    TEXT NOT NULL,
+  quantity       REAL NOT NULL,
+  from_planet_id INTEGER NOT NULL,
+  to_planet_id   INTEGER NOT NULL,
+  departure_tick INTEGER NOT NULL,
+  arrival_tick   INTEGER NOT NULL
+);
+
+-- Marchands indépendants : un seul lot en soute à la fois (cargo_*).
+CREATE TABLE IF NOT EXISTS traders (
+  id             INTEGER PRIMARY KEY,
+  name           TEXT NOT NULL,
+  planet_id      INTEGER,
+  dest_planet_id INTEGER,
+  arrival_tick   INTEGER,
+  credits        REAL NOT NULL,
+  cargo_resource TEXT,
+  cargo_qty      REAL NOT NULL DEFAULT 0,
+  cargo_cost     REAL NOT NULL DEFAULT 0,
+  trades_done    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS contracts (
+  id                INTEGER PRIMARY KEY,
+  faction_id        INTEGER NOT NULL,
+  resource_id       TEXT NOT NULL,
+  quantity          REAL NOT NULL,
+  remaining         REAL NOT NULL,
+  unit_price        REAL NOT NULL,
+  deliver_planet_id INTEGER NOT NULL,
+  expires_tick      INTEGER NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'open' -- open | done | expired
+);
 `;
+
+// Colonnes ajoutées après coup (migration douce des parties existantes).
+const MIGRATIONS = [
+  { table: 'systems', column: 'faction_id', ddl: 'ALTER TABLE systems ADD COLUMN faction_id INTEGER' },
+  { table: 'planets', column: 'supply', ddl: 'ALTER TABLE planets ADD COLUMN supply REAL NOT NULL DEFAULT 1' },
+];
 
 export function createDb(path) {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
+  for (const m of MIGRATIONS) {
+    const cols = db.pragma(`table_info(${m.table})`).map((c) => c.name);
+    if (!cols.includes(m.column)) db.exec(m.ddl);
+  }
   return db;
 }
 
@@ -157,6 +219,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
+      'contracts', 'traders', 'shipments', 'factions',
       'trade_partners', 'known_prices', 'concession', 'ship_cargo', 'ships',
       'player', 'price_history', 'planet_industries', 'planet_resources',
       'system_distances', 'planets', 'systems', 'meta',

@@ -9,6 +9,8 @@ import { createDb, getMeta, setMeta, getCurrentTick } from './db.js';
 import { generateUniverse } from './universe/generator.js';
 import { randomSeed } from './universe/rng.js';
 import { runTick } from './simulation.js';
+import { generateFactions } from './factions/generate.js';
+import { initTraders } from './npc/traders.js';
 import { initPlayer, getPlayer, getShip } from './player/state.js';
 import { createApiRouter } from './routes/api.js';
 
@@ -21,6 +23,17 @@ if (getMeta(db, 'seed') === null) {
   console.log(`✦ Univers généré — seed ${seed} : ${systems} systèmes, ${planets} planètes`);
 } else {
   console.log(`✦ Univers chargé — seed ${getMeta(db, 'seed')}`);
+}
+
+// Factions et marchands : créés s'ils manquent (migration des parties
+// antérieures à la Phase 3 comprise).
+if (!db.prepare('SELECT 1 FROM factions LIMIT 1').get()) {
+  const { factions } = generateFactions(db);
+  console.log(`✦ ${factions} factions fondées`);
+}
+if (!db.prepare('SELECT 1 FROM traders LIMIT 1').get()) {
+  const { traders } = initTraders(db);
+  console.log(`✦ ${traders} marchands indépendants en activité`);
 }
 
 // Nouvelle partie si aucun joueur (couvre aussi les DB de la Phase 1).

@@ -43,6 +43,8 @@ function formatPop(popM) {
 const state = {
   universe: null,
   planetIndex: new Map(), // planetId → { planet, system }
+  factionById: new Map(),
+  capitalSystems: new Map(), // systemId → faction (pour le marqueur capitale)
   tick: null,
   speed: 1,
   player: null,
@@ -137,6 +139,17 @@ function drawMap() {
   const rect = canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
 
+  // Territoires : halo aux couleurs de la faction derrière chaque système.
+  for (const sys of state.universe.systems) {
+    if (sys.faction_id === null) continue;
+    const faction = state.factionById.get(sys.faction_id);
+    const [sx, sy] = toScreen(sys.x, sys.y);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 15, 0, Math.PI * 2);
+    ctx.fillStyle = faction.color + '1d'; // alpha en hexa
+    ctx.fill();
+  }
+
   for (const sys of state.universe.systems) {
     const [sx, sy] = toScreen(sys.x, sys.y);
     const r = starRadius(sys);
@@ -158,6 +171,20 @@ function drawMap() {
       ctx.arc(sx, sy, r + 5, 0, Math.PI * 2);
       ctx.strokeStyle = '#53c7f0';
       ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+
+    // Capitale de faction : un losange aux couleurs du royaume.
+    const capital = state.capitalSystems.get(sys.id);
+    if (capital) {
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - r - 7);
+      ctx.lineTo(sx + r + 7, sy);
+      ctx.lineTo(sx, sy + r + 7);
+      ctx.lineTo(sx - r - 7, sy);
+      ctx.closePath();
+      ctx.strokeStyle = capital.color;
+      ctx.lineWidth = 1;
       ctx.stroke();
     }
   }
@@ -245,16 +272,30 @@ function tierBadge(tier) {
   return `<span class="badge ${locked ? 'locked' : ''}">T${tier}${locked ? ' ⚿' : ''}</span>`;
 }
 
+function factionChip(factionId) {
+  if (factionId === null || factionId === undefined) return '<span class="badge">Frange indépendante</span>';
+  const f = state.factionById.get(factionId);
+  return `<button class="faction-chip" data-faction="${f.id}" style="color:${f.color};border-color:${f.color}">${f.name}</button>`;
+}
+
+function bindFactionChips() {
+  for (const chip of panel.querySelectorAll('.faction-chip')) {
+    chip.addEventListener('click', () => renderFactionPanel(Number(chip.dataset.faction)));
+  }
+}
+
 async function renderSystemPanel(sys) {
   const age = state.knowledge.get(sys.id);
   panel.innerHTML = `
     <h2 class="panel-title">${sys.name}</h2>
     <p class="panel-sub">Système — position (${Math.round(sys.x)}, ${Math.round(sys.y)})
       — ${age === undefined ? 'marchés inconnus' : `données : il y a ${age} ticks`}</p>
+    <div style="margin:4px 0 8px">${factionChip(sys.faction_id)}</div>
     <div class="section-label">Planètes (${sys.planets.length})</div>
     <div id="system-planets"></div>
     <div id="system-actions"></div>
   `;
+  bindFactionChips();
   const wrap = $('#system-planets');
   for (const p of sys.planets) {
     const row = document.createElement('button');
@@ -315,13 +356,16 @@ async function refreshPlanetPanel() {
 }
 
 function panelHeader(planet, extra = '') {
+  const supply = planet.supply !== undefined && planet.supply < 0.85
+    ? ` · <span class="price-high">approvisionnement ${Math.round(planet.supply * 100)} %</span>` : '';
   return `
     <button class="back-link" id="back-to-system">← ${planet.system_name}</button>
     <h2 class="panel-title">${planet.name} ${tierBadge(planet.tier)} ${extra}</h2>
     <p class="panel-sub">
       <span class="biome-dot" style="display:inline-block;background:${BIOME_COLORS[planet.biome]}"></span>
-      ${planet.biomeLabel} — ${formatPop(planet.population)}
+      ${planet.biomeLabel} — ${formatPop(planet.population)}${supply}
     </p>
+    <div style="margin:0 0 8px">${factionChip(planet.faction_id)}</div>
   `;
 }
 
@@ -589,6 +633,78 @@ async function renderRemotePanel(planet, market) {
   }
 }
 
+// ── Panneau : faction ────────────────────────────────────────────
+
+async function renderFactionPanel(factionId) {
+  const f = await api(`/faction/${factionId}`);
+  state.selectedPlanet = null;
+
+  let html = `
+    <button class="back-link" id="back-to-system">← carte</button>
+    <h2 class="panel-title" style="color:${f.color}">${f.name}</h2>
+    <p class="panel-sub">${f.systems} systèmes · ${f.planets} planètes —
+      capitale : ${f.capital_name}</p>
+    <div class="info-block">
+      <div class="row"><span>Flotte</span><span>${fmtInt.format(f.fleet)} vaisseaux</span></div>
+      <div class="row"><span>Disponibilité</span><span>${Math.round(f.readiness * 100)} %</span></div>
+      <div class="row"><span>Chantier naval</span><span>${fmtNum.format(f.fleet_progress)} / 25</span></div>
+    </div>
+  `;
+
+  html += `<div class="section-label">Tensions stratégiques (capitale)</div>`;
+  if (f.shortages.length === 0) {
+    html += `<div class="industry io">Approvisionnement correct</div>`;
+  }
+  for (const s of f.shortages) {
+    html += `<div class="industry">${s.name}
+      <span class="io">— manque ${Math.round(s.pressure * 100)} % · ${fmtPrice.format(s.price)} cr</span></div>`;
+  }
+
+  html += `<div class="section-label">Contrats de la faction (tier 4)</div>`;
+  if (!f.contractAccess) {
+    html += `<div class="info-block">Accès fermé : ${f.contractAccessReason}</div>`;
+  } else if (f.contracts.length === 0) {
+    html += `<div class="industry io">Aucun appel d'offres en cours</div>`;
+  }
+  if (f.contractAccess) {
+    for (const c of f.contracts) {
+      const here = state.player?.ship?.planet_id === c.deliver_planet_id;
+      html += `
+        <div class="info-block">
+          <div class="row"><span>${c.resourceName}</span>
+            <span>${fmtQty(c.remaining)} / ${fmtQty(c.quantity)} restants</span></div>
+          <div class="row"><span>Prix contractuel</span>
+            <span class="price-low">${fmtPrice.format(c.unit_price)} cr/u</span></div>
+          <div class="row"><span>Livraison</span><span>${c.deliver_planet_name}</span></div>
+          <div class="row"><span>Expire</span><span>tick ${c.expires_tick}</span></div>
+          <button class="action-btn deliver-btn" data-contract="${c.id}" ${here ? '' : 'disabled'}>
+            ${here ? 'Livrer depuis la soute' : 'Livraison à ' + c.deliver_planet_name}
+          </button>
+        </div>
+      `;
+    }
+  }
+
+  panel.innerHTML = html;
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+  });
+  for (const btn of panel.querySelectorAll('.deliver-btn')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/contracts/${btn.dataset.contract}/deliver`);
+      if (r.ok) {
+        log(`Contrat : ${fmtQty(r.delivered)} livrés, +${fmtPrice.format(r.paid)} cr`
+          + (r.done ? ` · contrat honoré, +${r.prestigeGained} prestige` : ''));
+      } else {
+        log(`Livraison refusée : ${r.error}`);
+      }
+      await refreshPlayerAndKnowledge();
+      renderHudPlayer();
+      renderFactionPanel(factionId);
+    });
+  }
+}
+
 // Tendance de prix sur l'historique (~5 ticks).
 function computeTrends(market) {
   const trends = {};
@@ -712,6 +828,10 @@ async function init() {
 
   for (const sys of universe.systems) {
     for (const p of sys.planets) state.planetIndex.set(p.id, { planet: p, system: sys });
+  }
+  for (const f of universe.factions) {
+    state.factionById.set(f.id, f);
+    state.capitalSystems.set(state.planetIndex.get(f.capital_planet_id).system.id, f);
   }
 
   renderHudState(s);

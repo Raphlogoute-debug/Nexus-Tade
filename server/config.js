@@ -108,4 +108,78 @@ export const CONFIG = {
     // Garde-fou du bouton « avancer jusqu'à l'arrivée ».
     SKIP_MAX_TICKS: 200,
   },
+
+  // ── Phase 3 : factions, flux, PNJ ────────────────────────────
+
+  FACTIONS: {
+    MIN_COUNT: 6,
+    MAX_COUNT: 9,
+    // Un système rejoint la capitale la plus proche si elle est à moins de
+    // ce rayon ; au-delà, il reste indépendant (la Frange).
+    TERRITORY_RADIUS: 650,
+    MIN_CAPITAL_SPACING: 380, // distance min entre deux capitales
+    COLORS: ['#e05d5d', '#5d9de0', '#5dc78f', '#d8a23f', '#a06de0',
+      '#e07db8', '#56c4c4', '#9aab4a'],
+    START_FLEET_BASE: 15,
+    START_FLEET_PER_SYSTEM: 2,
+  },
+
+  // Besoins des populations : satisfaction, démographie, élasticité.
+  NEEDS: {
+    VITAL: ['water', 'synth_food'], // les besoins qui font vivre ou mourir
+    SUPPLY_EMA: 0.08,               // lissage de l'indice d'approvisionnement
+    POP_DRIFT: 0.0008,              // ±0,08 %/tick max selon la satisfaction
+    RECALC_EVERY: 20,               // ticks entre recalculs de la conso (pop a bougé)
+    // Élasticité de la demande civile : quand c'est hors de prix on se
+    // rationne, quand c'est bradé on consomme un peu plus.
+    COMPRESSION_ELASTICITY: 0.35,
+    COMPRESSION_MIN: 0.6,
+    COMPRESSION_MAX: 1.1,
+  },
+
+  // Logistique interne des factions : des convois (flux statistiques,
+  // pas des vaisseaux simulés un à un) équilibrent les membres.
+  FLOWS: {
+    EVERY_TICKS: 2,        // fréquence de planification
+    SPEED: 120,            // unités de carte par tick
+    MAX_PER_PLANNING: 3,   // nouveaux convois max par faction et par planif
+    DEFICIT_PRESSURE: 0.25,  // (cible-stock)/cible au-dessus → demandeur
+    SURPLUS_PRESSURE: -0.25, // en dessous → fournisseur
+    SHARE: 0.25,           // part du surplus embarquée par convoi
+    MAX_QTY: 250,
+  },
+
+  // Programme naval des factions : le chantier de la capitale consomme de
+  // vraies ressources du marché local — couper l'approvisionnement
+  // paralyse la construction (loi du minimum, comme les industries).
+  FLEET: {
+    BUILD: { ship_modules: 2, mech_parts: 2, fuel: 3 }, // conso max/tick
+    SHIP_COST: 25,          // ticks de chantier à plein régime par vaisseau
+    UPKEEP_PER_SHIP: { fuel: 0.04, mech_parts: 0.008 },
+    READINESS_EMA: 0.05,    // la disponibilité suit l'entretien réellement payé
+  },
+
+  // Marchands indépendants (agents pleins) : ils font le même métier que
+  // le joueur, sur les mêmes marchés, avec les mêmes règles d'impact prix.
+  TRADERS: {
+    PER_SYSTEMS: 2,         // ~1 marchand pour 2 systèmes
+    CAPACITY: 150,
+    SPEED: 130,
+    SCAN_RADIUS: 450,       // ils connaissent leur région, pas la galaxie
+    MIN_MARGIN: 0.3,        // marge relative minimale pour se déplacer
+    MOVE_COST_PER_DIST: 0.05, // carburant forfaitaire (crédits par unité)
+    START_CREDITS: 3000,
+    MAX_BUY_SHARE: 0.25,    // part max du stock local par achat
+  },
+
+  // Contrats de faction (tier 4) : traiter avec le royaume lui-même.
+  CONTRACTS: {
+    EVERY_TICKS: 25,
+    EXPIRY: 90,
+    PREMIUM: 1.35,          // prix payé vs prix du marché à l'émission
+    MAX_OPEN_PER_FACTION: 2,
+    PRESTIGE_REQUIRED: 1500,
+    PARTNERS_REQUIRED: 2,   // partenaires commerciaux dans la faction
+    COMPLETION_PRESTIGE: 60,
+  },
 };

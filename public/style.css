@@ -316,3 +316,15 @@ tr.res-row.selected td { background: #1a2334; }
   margin: 4px 0 8px;
 }
 .gauge > div { height: 100%; background: var(--accent); }
+
+.faction-chip {
+  background: none;
+  border: 1px solid;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.faction-chip:hover { opacity: 1; }

@@ -17,6 +17,9 @@ import { initPlayer, getPlayer, getShip, getCargo, tierOf } from '../server/play
 import { previewTrade, executeTrade } from '../server/player/trade.js';
 import { previewTravel, startTravel } from '../server/player/travel.js';
 import { getConcession, collectConcession } from '../server/player/concession.js';
+import { generateFactions } from '../server/factions/generate.js';
+import { initTraders } from '../server/npc/traders.js';
+import { tickContracts, deliverContract } from '../server/factions/contracts.js';
 
 const SEED = 424242;
 const TICKS = 10;
@@ -248,8 +251,130 @@ const secondHand = db.prepare(
 check(secondHand > 0,
   `${secondHand} relevés de seconde main (prix sans stocks) — l'info complète exige d'être sur place`);
 
+// ══ Phase 3 : factions, flux, PNJ ════════════════════════════════
+
+console.log('\n■ Phase 3 — factions, logistique, marchands, besoins\n');
+
+const popBefore = new Map(
+  db.prepare('SELECT id, population FROM planets').all().map((p) => [p.id, p.population]));
+
+const { factions: factionCount } = generateFactions(db);
+const { traders: traderCount } = initTraders(db);
+const fringe = db.prepare('SELECT COUNT(*) AS n FROM systems WHERE faction_id IS NULL').get().n;
+check(factionCount >= CONFIG.FACTIONS.MIN_COUNT && factionCount <= CONFIG.FACTIONS.MAX_COUNT,
+  `${factionCount} factions fondées, ${fringe} systèmes dans la Frange indépendante, ${traderCount} marchands PNJ`);
+
+const capitalsOk = db.prepare(
+  `SELECT COUNT(*) AS n FROM factions f
+   JOIN planets p ON p.id = f.capital_planet_id
+   JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id = f.id`
+).get().n;
+check(capitalsOk === factionCount, 'chaque capitale est dans le territoire de sa faction');
+
+// Le monde complet tourne : convois, marchands, chantiers, démographie.
+for (let i = 0; i < 20; i++) runTick(db);
+
+const shipmentsCreated = db.prepare('SELECT COALESCE(MAX(id), 0) AS n FROM shipments').get().n;
+check(shipmentsCreated > 0,
+  `logistique : ${shipmentsCreated} convois affrétés en 20 ticks (flux statistiques internes)`);
+
+const npcTrades = db.prepare('SELECT SUM(trades_done) AS n, COUNT(*) AS c FROM traders').get();
+check(npcTrades.n > 0,
+  `marchands : ${npcTrades.n} transactions PNJ exécutées (mêmes règles d'impact prix que le joueur)`);
+
+const buildSum = db.prepare('SELECT SUM(fleet_progress) + SUM(fleet) AS n FROM factions').get().n;
+check(buildSum > 0, 'les chantiers navals consomment de vraies ressources et produisent');
+
+const minSupply = db.prepare('SELECT MIN(supply) AS s FROM planets').get().s;
+const popChanged = db.prepare('SELECT id, population FROM planets').all()
+  .filter((p) => p.population !== popBefore.get(p.id)).length;
+check(minSupply < 0.95 && popChanged > 0,
+  `besoins : indice d'approvisionnement min ${minSupply.toFixed(2)}, démographie de ${popChanged} planètes en dérive`);
+
+// ── Le scénario du fournisseur dominant qui coupe tout ───────────
+// Un royaume a besoin de modules pour ses vaisseaux. Phase A : capitale
+// massivement approvisionnée (le joueur fournit). Phase B : on coupe TOUT
+// (stocks stratégiques à zéro, partout). Le chantier doit se paralyser et
+// la disponibilité de la flotte chuter.
+
+const faction = db.prepare('SELECT * FROM factions ORDER BY fleet DESC LIMIT 1').get();
+const shipsEquiv = () => {
+  const f = db.prepare('SELECT fleet, fleet_progress FROM factions WHERE id = ?').get(faction.id);
+  return f.fleet * CONFIG.FLEET.SHIP_COST + f.fleet_progress;
+};
+const setStock = db.prepare(
+  'UPDATE planet_resources SET stock = ? WHERE resource_id = ? AND planet_id = ?'
+);
+
+// Phase A : le fournisseur (vous) inonde la capitale d'intrants.
+for (const resourceId of Object.keys(CONFIG.FLEET.BUILD)) {
+  setStock.run(800, resourceId, faction.capital_planet_id);
+}
+const beforeA = shipsEquiv();
+for (let i = 0; i < 8; i++) runTick(db);
+const gainA = shipsEquiv() - beforeA;
+const readinessA = db.prepare('SELECT readiness FROM factions WHERE id = ?').get(faction.id).readiness;
+
+// Phase B : rupture totale d'approvisionnement stratégique.
+db.prepare("UPDATE planet_resources SET stock = 0 WHERE resource_id IN ('ship_modules', 'mech_parts')").run();
+const beforeB = shipsEquiv();
+for (let i = 0; i < 8; i++) runTick(db);
+const gainB = shipsEquiv() - beforeB;
+const readinessB = db.prepare('SELECT readiness FROM factions WHERE id = ?').get(faction.id).readiness;
+
+console.log(`\n  [DÉPENDANCE] ${faction.name} — chantier naval de la capitale`);
+console.log(`    approvisionné : +${gainA.toFixed(1)} de production navale en 8 ticks (disponibilité ${Math.round(readinessA * 100)} %)`);
+console.log(`    coupé         : +${gainB.toFixed(1)} en 8 ticks (disponibilité ${Math.round(readinessB * 100)} %)`);
+check(gainB < gainA * 0.5,
+  `couper l'approvisionnement paralyse la construction (${gainA.toFixed(1)} → ${gainB.toFixed(1)})`);
+check(readinessB < readinessA,
+  `la flotte privée d'entretien se dégrade (${Math.round(readinessA * 100)} % → ${Math.round(readinessB * 100)} %)`);
+
+// ── Contrats de faction : la pénurie appelle le marchand ─────────
+tickContracts(db, CONFIG.CONTRACTS.EVERY_TICKS * 40); // force une émission
+const contract = db.prepare(
+  "SELECT * FROM contracts WHERE status = 'open' AND faction_id = ?"
+).get(faction.id);
+check(Boolean(contract),
+  contract && `la pénurie déclenche un appel d'offres : ${RESOURCES[contract.resource_id].name}`
+  + ` ×${contract.quantity} à ${contract.unit_price} cr/u (premium sur le marché)`);
+
+// Un marchand établi honore le contrat.
+db.prepare('UPDATE player SET prestige = 2000 WHERE id = 1').run();
+for (const p of db.prepare(
+  `SELECT p.id FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id = ? LIMIT 2`).all(faction.id)) {
+  db.prepare('INSERT OR IGNORE INTO trade_partners (planet_id, first_trade_tick) VALUES (?, 0)')
+    .run(p.id);
+}
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?')
+  .run(contract.deliver_planet_id, getShip(db).id);
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, ?, 120, 40)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 120, avg_cost = 40`
+).run(getShip(db).id, contract.resource_id);
+
+const creditsBefore = getPlayer(db).credits;
+const delivery = deliverContract(db, contract.id);
+check(delivery.ok && getPlayer(db).credits > creditsBefore,
+  delivery.ok && `livraison : ${delivery.delivered} unités, +${delivery.paid} cr au prix contractuel`);
+
+// Loi du minimum oblige : les modules livrés ne suffisent pas si les autres
+// intrants manquent aussi. On les fournit (vente classique au marché) et le
+// chantier repart.
+for (const resourceId of Object.keys(CONFIG.FLEET.BUILD)) {
+  if (resourceId !== contract.resource_id) {
+    setStock.run(200, resourceId, faction.capital_planet_id);
+  }
+}
+const progressBefore = shipsEquiv();
+for (let i = 0; i < 3; i++) runTick(db);
+check(shipsEquiv() > progressBefore,
+  'modules livrés + intrants revenus → le chantier repart : la dépendance joue dans les deux sens');
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 et 2 vérifiées : économie, commerce, voyage, tiers et connaissance OK\n');
+  : '\n✓ Phases 1, 2 et 3 vérifiées : économie, commerce, factions, flux, PNJ et besoins OK\n');
 process.exit(failures ? 1 : 0);
