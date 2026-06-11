@@ -618,6 +618,14 @@ function renderDockedPanel(planet, market) {
       </div>`;
   }
 
+  // Charte industrielle : fonder une nouvelle industrie sur cette planète.
+  if (shipHere && planet.foundable?.length > 0) {
+    html += `<div class="row" style="margin:6px 0"><span>Fonder une industrie</span><span>
+      <select id="found-recipe">${planet.foundable.map((f) =>
+        `<option value="${f.recipe_id}">${f.name} (${fmtQty(f.cost)} cr)</option>`).join('')}</select>
+      <button class="action-btn" id="btn-found">Fonder (49 %)</button></span></div>`;
+  }
+
   html += `
     <div class="section-label">Marché en direct — tick ${market.tick}</div>
     <table>
@@ -723,6 +731,14 @@ function renderDockedPanel(planet, market) {
       refreshPlanetPanelForce();
     });
   }
+  $('#btn-found')?.addEventListener('click', async () => {
+    const r = await apiPost('/industry/found', { recipeId: $('#found-recipe').value, shipId });
+    if (r.ok) log(`Industrie fondée : ${r.name} sur ${r.planetName} (×${fmtNum.format(r.rate)}/tick, 49 % fondateur, −${fmtQty(r.cost)} cr)`);
+    else log(`Fondation impossible : ${r.error}`);
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
+
   for (const btn of panel.querySelectorAll('.divest-btn')) {
     btn.addEventListener('click', async () => {
       const r = await apiPost('/industry/divest', { recipeId: btn.dataset.recipe, shipId });

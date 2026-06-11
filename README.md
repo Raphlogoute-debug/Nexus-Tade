@@ -208,6 +208,20 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   leurs débouchés : plaques de coque, combustible nucléaire, engrais,
   cellules à fusion, capteurs ; filières rattachées à l'arbre techno
 
+**Arbre technologique étendu : 19 technologies**
+- **Charte industrielle** : fonder de NOUVELLES industries planétaires sur
+  n'importe quel monde accessible — vous apportez les plans (filière
+  recherchée) et le capital (valorisation ×1,2), la planète la main-d'œuvre
+  (cadence selon sa population) ; l'usine devient une vraie industrie
+  locale (moteur, convois, contrats la voient) et vous gardez 49 % de
+  parts fondateur
+- Paliers d'échelle : Foreuses quantiques (extraction ×2,5), Stockage
+  orbital (entrepôts ×4), Ingénierie puis Ateliers automatisés (cadence
+  ×2 / ×4), Prospection profonde (10 concessions)
+- Flotte et réseau : Moteurs économes (carburant −30 %), Soutes modulaires
+  (+25 %, rétrofit immédiat), Réseau de courtage (rumeurs +50 % de portée,
+  relevés à moitié prix)
+
 **Phase 9 — finance de guerre et contrebande** (`server/factions/loans.js`,
 `server/player/smuggling.js`)
 - **Prêts de guerre** : prêter à un belligérant (panneau faction) ;

@@ -3,6 +3,7 @@
 
 import { CONFIG } from '../config.js';
 import { getPlayer, getShip, getFleet, adjustCredits, tierOf } from './state.js';
+import { hasTech } from './tech.js';
 
 const SH = CONFIG.SHIPS;
 
@@ -32,13 +33,15 @@ export function buyShip(db, classId) {
   const n = fleet.length;
   const name = SH.NAMES[n % SH.NAMES.length]
     + (n >= SH.NAMES.length ? ` ${Math.floor(n / SH.NAMES.length) + 1}` : '');
+  const cargo = Math.round(cls.cargo
+    * (hasTech(db, 'expanded_holds') ? CONFIG.PLAYER.FACILITIES.HOLDS_MULT : 1));
   let shipId;
   db.transaction(() => {
     adjustCredits(db, -cls.price);
     shipId = db.prepare(
       `INSERT INTO ships (name, planet_id, cargo_capacity, fuel, fuel_capacity, speed, mode, class)
        VALUES (?, ?, ?, ?, ?, ?, 'manual', ?)`
-    ).run(name, dockyard.planet_id, cls.cargo, cls.fuel, cls.fuel, cls.speed, classId).lastInsertRowid;
+    ).run(name, dockyard.planet_id, cargo, cls.fuel, cls.fuel, cls.speed, classId).lastInsertRowid;
   })();
 
   return { ok: true, shipId, name, classLabel: cls.label, price: cls.price, upkeep: cls.upkeep, planetId: dockyard.planet_id };

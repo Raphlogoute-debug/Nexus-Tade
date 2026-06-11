@@ -48,11 +48,17 @@ function recordSecondHand(db, planetId, asOfTick) {
 // d'amarrage (y compris le système local), avec une ancienneté qui varie
 // d'une planète à l'autre — les nouvelles voyagent mal.
 export function recordGossipAround(db, systemId, tick) {
+  // Réseau de courtage : vos contacts portent les rumeurs plus loin.
+  // (requête directe pour éviter un cycle d'imports avec player/tech.js)
+  const network = db.prepare(
+    "SELECT 1 FROM player_tech WHERE tech_id = 'trade_network'").get();
+  const radius = PL.GOSSIP_RADIUS
+    * (network ? PL.FACILITIES.NETWORK_RADIUS_MULT : 1);
   const nearSystems = db.prepare(
     `SELECT s.id FROM systems s, systems me
      WHERE me.id = ?
        AND (s.x - me.x) * (s.x - me.x) + (s.y - me.y) * (s.y - me.y) <= ?`
-  ).all(systemId, PL.GOSSIP_RADIUS ** 2);
+  ).all(systemId, radius ** 2);
 
   const planetsOf = db.prepare('SELECT id FROM planets WHERE system_id = ?');
   for (const sys of nearSystems) {
@@ -63,10 +69,14 @@ export function recordGossipAround(db, systemId, tick) {
   }
 }
 
-// Relevé de marché acheté pour un système entier. Retourne le coût.
+// Relevé de marché acheté pour un système entier. Retourne le coût
+// (à moitié prix avec le Réseau de courtage).
 export function intelCost(db, fromSystemId, targetSystemId) {
   const dist = systemDistance(db, fromSystemId, targetSystemId);
-  return Math.round(PL.INTEL.BASE_COST + PL.INTEL.COST_PER_DIST * dist);
+  const network = db.prepare(
+    "SELECT 1 FROM player_tech WHERE tech_id = 'trade_network'").get();
+  return Math.round((PL.INTEL.BASE_COST + PL.INTEL.COST_PER_DIST * dist)
+    * (network ? PL.FACILITIES.NETWORK_INTEL_MULT : 1));
 }
 
 export function recordIntel(db, targetSystemId, tick) {

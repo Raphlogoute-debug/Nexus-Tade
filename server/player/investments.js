@@ -9,6 +9,7 @@ import { RESOURCES } from '../../data/resources.js';
 import { RECIPES } from '../../data/recipes.js';
 import { getPlayer, getShip, adjustCredits, tierOf, hasTierAccess } from './state.js';
 import { marketOpen } from '../factions/standing.js';
+import { hasTech, unlockedRecipes } from './tech.js';
 
 const INV = CONFIG.PLAYER.INVEST;
 
@@ -107,6 +108,65 @@ export function divestIndustry(db, recipeId, shipId) {
       .run(ship.planet_id, recipeId);
   })();
   return { ok: true, refund, name: RESOURCES[recipeId].name };
+}
+
+// Fonder une industrie planétaire (Charte industrielle) : vous apportez
+// les plans (filière recherchée) et le capital, la planète apporte la
+// main-d'œuvre — l'usine devient une vraie industrie locale (le moteur,
+// les convois et les contrats la voient), et vous partez avec 49 % de
+// parts fondateur. C'est LA construction de bâtiments chez les autres.
+export function foundIndustry(db, recipeId, shipId) {
+  if (!RECIPES[recipeId]) return { ok: false, error: 'recette inconnue' };
+  if (!hasTech(db, 'industrial_charter')) {
+    return { ok: false, error: 'technologie Charte industrielle requise' };
+  }
+  if (!unlockedRecipes(db).has(recipeId)) {
+    return { ok: false, error: 'filière non recherchée — apportez les plans' };
+  }
+
+  const ship = getShip(db, shipId);
+  if (!ship || ship.planet_id === null) return { ok: false, error: 'vaisseau en transit' };
+
+  const planet = db.prepare(
+    `SELECT p.id, p.name, p.population, s.faction_id FROM planets p
+     JOIN systems s ON s.id = p.system_id WHERE p.id = ?`
+  ).get(ship.planet_id);
+  if (db.prepare(
+    'SELECT 1 FROM planet_industries WHERE planet_id = ? AND recipe_id = ?'
+  ).get(planet.id, recipeId)) {
+    return { ok: false, error: 'cette industrie existe déjà ici — achetez-en des parts' };
+  }
+
+  const player = getPlayer(db);
+  if (!hasTierAccess(player, tierOf(planet.population))) {
+    return { ok: false, error: 'accès au marché requis (tier) pour fonder ici' };
+  }
+  if (!marketOpen(db, planet.faction_id)) {
+    return { ok: false, error: 'votre nom est sur liste noire ici' };
+  }
+
+  // Cadence dictée par la main-d'œuvre locale (même formule que la
+  // génération, sans aléa) ; coût = valorisation × surcote de fondation.
+  const E = CONFIG.ECONOMY;
+  const rate = Math.round(
+    (E.INDUSTRY_BASE_RATE + E.INDUSTRY_POP_COEF * planet.population) * 100) / 100;
+  const cost = Math.round(industryValuation(recipeId, rate) * CONFIG.PLAYER.FACILITIES.FOUND_MULT);
+  if (player.credits < cost) return { ok: false, error: `crédits insuffisants (${cost} cr)` };
+
+  db.transaction(() => {
+    adjustCredits(db, -cost);
+    db.prepare(
+      'INSERT INTO planet_industries (planet_id, recipe_id, rate) VALUES (?, ?, ?)'
+    ).run(planet.id, recipeId, rate);
+    db.prepare(
+      'INSERT INTO industry_shares (planet_id, recipe_id, share) VALUES (?, ?, ?)'
+    ).run(planet.id, recipeId, INV.MAX_SHARE);
+  })();
+
+  return {
+    ok: true, planetName: planet.name, recipeId, name: RESOURCES[recipeId].name,
+    rate, cost, share: INV.MAX_SHARE,
+  };
 }
 
 // Versement des dividendes du tick, sur la production réelle.

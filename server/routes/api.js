@@ -20,7 +20,7 @@ import {
 import { buyShip, setShipMode, fleetUpkeep } from '../player/shipyard.js';
 import { createRoute, listRoutes, deleteRoute, assignRoute } from '../player/routes.js';
 import {
-  investIndustry, divestIndustry, listInvestments, industryValuation, getShare,
+  investIndustry, divestIndustry, foundIndustry, listInvestments, industryValuation, getShare,
 } from '../player/investments.js';
 import { buyFalseFlag } from '../player/smuggling.js';
 import { issueLoan, listLoans } from '../factions/loans.js';
@@ -28,9 +28,9 @@ import { previewTrade, executeTrade, refuel, buyLicence } from '../player/trade.
 import { previewTravel, startTravel } from '../player/travel.js';
 import {
   listConcessions, collectConcession, depositToConcession, upgradeConcession,
-  buyConcession, installWorkshop,
+  buyConcession, installWorkshop, maxConcessions,
 } from '../player/concession.js';
-import { techCatalog, researchTech, unlockedRecipes } from '../player/tech.js';
+import { techCatalog, researchTech, unlockedRecipes, hasTech } from '../player/tech.js';
 import {
   knownMarket, knowledgeSummary, intelCost, recordIntel, systemDistance,
 } from '../player/knowledge.js';
@@ -140,6 +140,21 @@ export function createApiRouter(db, clock) {
         maxShare: CONFIG.PLAYER.INVEST.MAX_SHARE,
       }));
       payload.resources = planetSnapshot(db, id);
+
+      // Industries fondables ici (Charte industrielle + filières du joueur).
+      if (hasTech(db, 'industrial_charter')) {
+        const existing = new Set(payload.industries.map((i) => i.recipe_id));
+        const E = CONFIG.ECONOMY;
+        const rate = Math.round(
+          (E.INDUSTRY_BASE_RATE + E.INDUSTRY_POP_COEF * planet.population) * 100) / 100;
+        payload.foundable = [...unlockedRecipes(db)]
+          .filter((r) => !existing.has(r))
+          .map((r) => ({
+            recipe_id: r,
+            name: RESOURCES[r].name,
+            cost: Math.round(industryValuation(r, rate) * CONFIG.PLAYER.FACILITIES.FOUND_MULT),
+          }));
+      }
     }
 
     res.json(payload);
@@ -248,7 +263,7 @@ export function createApiRouter(db, clock) {
       concessions,
       nextConcessionPrice: CONFIG.PLAYER.FACILITIES.CONCESSION_BASE_PRICE
         * 2 ** Math.max(0, concessions.length - 1),
-      maxConcessions: CONFIG.PLAYER.FACILITIES.MAX_CONCESSIONS,
+      maxConcessions: maxConcessions(db),
       // Ateliers installables (selon les filières recherchées).
       workshopCatalog: (() => {
         const unlocked = unlockedRecipes(db);
@@ -298,6 +313,15 @@ export function createApiRouter(db, clock) {
       return res.status(400).json({ error: 'paramètres invalides' });
     }
     answer(res, divestIndustry(db, recipeId, shipId));
+  });
+
+  router.post('/industry/found', (req, res) => {
+    const { recipeId } = req.body ?? {};
+    const shipId = parseShipId(req.body?.shipId);
+    if (typeof recipeId !== 'string' || shipId === null) {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, foundIndustry(db, recipeId, shipId));
   });
 
   // ── Technologies ───────────────────────────────────────────────

@@ -29,7 +29,11 @@ export function previewTravel(db, destPlanetId, shipId) {
     .get(ship.planet_id).system_id;
   const distance = systemDistance(db, originSystem, dest.system_id);
   const ticks = Math.max(1, Math.ceil(distance / ship.speed));
-  const fuelCost = Math.ceil(distance / SHIP.DIST_PER_FUEL);
+  // Moteurs économes : −30 % de carburant sur tous les trajets.
+  const efficient = db.prepare(
+    "SELECT 1 FROM player_tech WHERE tech_id = 'efficient_drives'").get();
+  const fuelCost = Math.ceil(
+    (distance / SHIP.DIST_PER_FUEL) * (efficient ? CONFIG.PLAYER.FACILITIES.FUEL_SAVING_MULT : 1));
 
   if (fuelCost > ship.fuel) {
     return { ok: false, error: 'carburant insuffisant', distance, ticks, fuelCost, fuel: ship.fuel };

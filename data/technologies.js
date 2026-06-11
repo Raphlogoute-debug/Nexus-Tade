@@ -11,17 +11,71 @@ export const TECHNOLOGIES = {
     requires: null,
     desc: 'Extraction des concessions +50 %',
   },
+  deep_mining_2: {
+    name: 'Foreuses quantiques',
+    cost: 60000,
+    requires: 'deep_mining',
+    desc: 'Extraction des concessions ×2,5',
+  },
   auto_warehouse: {
     name: 'Entrepôts automatisés',
     cost: 8000,
     requires: null,
     desc: "Capacité d'entrepôt des concessions ×2",
   },
+  orbital_storage: {
+    name: 'Stockage orbital',
+    cost: 40000,
+    requires: 'auto_warehouse',
+    desc: "Capacité d'entrepôt des concessions ×4",
+  },
   prospection: {
     name: 'Prospection planétaire',
     cost: 20000,
     requires: null,
     desc: 'Permet d’acheter des concessions sur d’autres mondes (5 max)',
+  },
+  prospection_2: {
+    name: 'Prospection profonde',
+    cost: 45000,
+    requires: 'prospection',
+    desc: 'Jusqu’à 10 concessions',
+  },
+  industrial_charter: {
+    name: 'Charte industrielle',
+    cost: 70000,
+    requires: 'prospection',
+    desc: 'Fonder de nouvelles industries planétaires (49 % fondateur, dividendes)',
+  },
+  workshop_engineering: {
+    name: 'Ingénierie d’ateliers',
+    cost: 35000,
+    requires: 'smelting',
+    desc: 'Cadence des ateliers ×2',
+  },
+  workshop_automation: {
+    name: 'Ateliers automatisés',
+    cost: 80000,
+    requires: 'workshop_engineering',
+    desc: 'Cadence des ateliers ×4',
+  },
+  efficient_drives: {
+    name: 'Moteurs économes',
+    cost: 25000,
+    requires: null,
+    desc: 'Consommation de carburant −30 % sur les trajets',
+  },
+  expanded_holds: {
+    name: 'Soutes modulaires',
+    cost: 40000,
+    requires: null,
+    desc: 'Soutes +25 % (flotte actuelle et constructions futures)',
+  },
+  trade_network: {
+    name: 'Réseau de courtage',
+    cost: 35000,
+    requires: null,
+    desc: 'Rumeurs de quai +50 % de portée, relevés de marché à moitié prix',
   },
 
   // ── Filières de transformation (recettes d'atelier) ────────────

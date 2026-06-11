@@ -2,6 +2,7 @@
 // débloque des filières d'atelier ou des effets permanents (voir
 // data/technologies.js pour l'arbre).
 
+import { CONFIG } from '../config.js';
 import { TECHNOLOGIES } from '../../data/technologies.js';
 import { getCurrentTick } from '../db.js';
 import { getPlayer, adjustCredits } from './state.js';
@@ -37,6 +38,13 @@ export function researchTech(db, techId) {
     adjustCredits(db, -tech.cost);
     db.prepare('INSERT INTO player_tech (tech_id, acquired_tick) VALUES (?, ?)')
       .run(techId, getCurrentTick(db));
+
+    // Soutes modulaires : la flotte existante est rétrofittée sur-le-champ
+    // (les achats futurs sont gérés par le chantier).
+    if (techId === 'expanded_holds') {
+      db.prepare('UPDATE ships SET cargo_capacity = ROUND(cargo_capacity * ?)')
+        .run(CONFIG.PLAYER.FACILITIES.HOLDS_MULT);
+    }
   })();
   return { ok: true, techId, name: tech.name, cost: tech.cost };
 }

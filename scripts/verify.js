@@ -19,10 +19,12 @@ import { previewTrade, executeTrade } from '../server/player/trade.js';
 import { previewTravel, startTravel } from '../server/player/travel.js';
 import {
   listConcessions, collectConcession, depositToConcession, buyConcession, installWorkshop,
+  maxConcessions,
 } from '../server/player/concession.js';
+import { intelCost } from '../server/player/knowledge.js';
 import { researchTech } from '../server/player/tech.js';
 import { createRoute, assignRoute, deleteRoute } from '../server/player/routes.js';
-import { investIndustry, divestIndustry } from '../server/player/investments.js';
+import { investIndustry, divestIndustry, foundIndustry } from '../server/player/investments.js';
 import { issueLoan } from '../server/factions/loans.js';
 import { buyFalseFlag } from '../server/player/smuggling.js';
 import { RECIPES as ALL_RECIPES } from '../data/recipes.js';
@@ -882,6 +884,80 @@ check(exposed.ok && flagAfter === 0 && getStanding(db, defender.id) < anonBefore
 check(!executeTrade(db, { side: 'buy', resourceId: 'water', quantity: 2 }).ok,
   'sans couverture, la liste noire reprend ses droits');
 CONFIG.SMUGGLING.DETECTION = 0.1;
+
+// ══ Technologies avancées et fondation d'industries ══════════════
+
+console.log('\n■ Technologies avancées — construction chez les autres\n');
+
+db.prepare('UPDATE player SET credits = 800000 WHERE id = 1').run();
+
+// Cadence d'ateliers ×2 puis extraction ×2,5 et entrepôts ×4.
+const rateW0 = listConcessions(db)[0].workshops[0]?.rate ?? CONFIG.PLAYER.FACILITIES.WORKSHOP_RATE;
+researchTech(db, 'workshop_engineering');
+const rateW1 = listConcessions(db)[0].workshops[0]?.rate;
+check(rateW1 === rateW0 * 2, `Ingénierie d'ateliers : cadence ${rateW0} → ${rateW1} runs/tick`);
+
+const ext0 = listConcessions(db)[0].rate;
+researchTech(db, 'deep_mining_2');
+const ext1 = listConcessions(db)[0].rate;
+check(Math.abs(ext1 / ext0 - CONFIG.PLAYER.FACILITIES.DEEP_MINING_2_MULT / CONFIG.PLAYER.FACILITIES.DEEP_MINING_MULT) < 0.01,
+  `Foreuses quantiques : extraction ${ext0} → ${ext1}/tick`);
+
+researchTech(db, 'auto_warehouse');
+researchTech(db, 'orbital_storage');
+check(listConcessions(db)[0].cap === 1500 * 4, // niveau 1 (1500) × Stockage orbital
+  `Stockage orbital : entrepôt à ${listConcessions(db)[0].cap} (×4)`);
+
+// Soutes modulaires : rétrofit immédiat de la flotte.
+const cargo0 = getShip(db, flagship.id).cargo_capacity;
+researchTech(db, 'expanded_holds');
+const cargo1 = getShip(db, flagship.id).cargo_capacity;
+check(cargo1 === Math.round(cargo0 * 1.25), `Soutes modulaires : ${cargo0} → ${cargo1} (flotte rétrofittée)`);
+
+// Moteurs économes : −30 % de carburant sur le même trajet.
+const farPlanet = db.prepare(
+  `SELECT p.id FROM planets p
+   JOIN systems s ON s.id = p.system_id, planets me JOIN systems ms ON ms.id = me.system_id
+   WHERE me.id = ? AND s.id != ms.id
+     AND (s.x - ms.x) * (s.x - ms.x) + (s.y - ms.y) * (s.y - ms.y) > 250000 LIMIT 1`
+).get(getShip(db, flagship.id).planet_id);
+const fuel0 = previewTravel(db, farPlanet.id, flagship.id).fuelCost;
+researchTech(db, 'efficient_drives');
+const fuel1 = previewTravel(db, farPlanet.id, flagship.id).fuelCost;
+check(fuel1 < fuel0, `Moteurs économes : ${fuel0} → ${fuel1} carburant sur le même trajet`);
+
+// Réseau de courtage : relevés à moitié prix.
+const intel0 = intelCost(db, home.system_id, fronts[0].system_id);
+researchTech(db, 'trade_network');
+const intel1 = intelCost(db, home.system_id, fronts[0].system_id);
+check(intel1 < intel0, `Réseau de courtage : relevé ${intel0} → ${intel1} cr`);
+
+// Prospection profonde : 10 concessions.
+researchTech(db, 'prospection_2');
+check(maxConcessions(db) === 10, 'Prospection profonde : plafond porté à 10 concessions');
+
+// Charte industrielle : fonder une vraie usine sur le monde d'un autre.
+researchTech(db, 'industrial_charter');
+const site = db.prepare(
+  `SELECT p.id, p.name FROM planets p
+   JOIN systems s ON s.id = p.system_id
+   JOIN planet_resources pr ON pr.planet_id = p.id AND pr.resource_id = 'biomass' AND pr.production > 5
+   WHERE (s.faction_id IS NULL OR s.faction_id != ?) AND p.population > 100
+     AND NOT EXISTS (SELECT 1 FROM planet_industries pi WHERE pi.planet_id = p.id AND pi.recipe_id = 'fertilizer')
+   LIMIT 1`
+).get(defender.id);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(site.id, flagship.id);
+const founded = foundIndustry(db, 'fertilizer', flagship.id);
+check(founded.ok && founded.share === 0.49
+  && Boolean(db.prepare(
+    "SELECT 1 FROM planet_industries WHERE planet_id = ? AND recipe_id = 'fertilizer'").get(site.id)),
+  founded.ok && `industrie fondée : Engrais sur ${founded.planetName} (×${founded.rate}/tick,`
+  + ` ${fmt(founded.cost)} cr, 49 % fondateur)`);
+
+const creditsFound = getPlayer(db).credits;
+for (let i = 0; i < 5; i++) runTick(db);
+check(getPlayer(db).credits > creditsFound - 5 * 6,
+  'l\'usine fondée tourne (biomasse locale) et verse déjà ses dividendes');
 
 db.close();
 console.log(failures

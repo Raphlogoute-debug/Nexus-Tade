@@ -24,8 +24,14 @@ const FAC = CONFIG.PLAYER.FACILITIES;
 function enrich(db, c) {
   const level = LEVELS[c.level - 1];
   const next = LEVELS[c.level] ?? null;
-  const rate = level.rate * (hasTech(db, 'deep_mining') ? FAC.DEEP_MINING_MULT : 1);
-  const cap = level.cap * (hasTech(db, 'auto_warehouse') ? FAC.WAREHOUSE_TECH_MULT : 1);
+  const extractMult = hasTech(db, 'deep_mining_2') ? FAC.DEEP_MINING_2_MULT
+    : hasTech(db, 'deep_mining') ? FAC.DEEP_MINING_MULT : 1;
+  const capMult = hasTech(db, 'orbital_storage') ? FAC.WAREHOUSE_TECH_2_MULT
+    : hasTech(db, 'auto_warehouse') ? FAC.WAREHOUSE_TECH_MULT : 1;
+  const workshopMult = hasTech(db, 'workshop_automation') ? FAC.WORKSHOP_AUTO_MULT
+    : hasTech(db, 'workshop_engineering') ? FAC.WORKSHOP_ENG_MULT : 1;
+  const rate = level.rate * extractMult;
+  const cap = level.cap * capMult;
   const storage = db.prepare(
     'SELECT resource_id, quantity FROM facility_storage WHERE concession_id = ? AND quantity > 0 ORDER BY resource_id'
   ).all(c.id).map((s) => ({ ...s, name: RESOURCES[s.resource_id].name }));
@@ -43,9 +49,14 @@ function enrich(db, c) {
       name: RESOURCES[w.recipe_id].name,
       inputs: RECIPES[w.recipe_id].inputs,
       output: RECIPES[w.recipe_id].output,
-      rate: FAC.WORKSHOP_RATE,
+      rate: FAC.WORKSHOP_RATE * workshopMult,
     })),
   };
+}
+
+// Plafond de concessions, selon la prospection recherchée.
+export function maxConcessions(db) {
+  return hasTech(db, 'prospection_2') ? FAC.MAX_CONCESSIONS_2 : FAC.MAX_CONCESSIONS;
 }
 
 export function listConcessions(db) {
@@ -186,7 +197,8 @@ export function buyConcession(db, shipId) {
   if (!hasTech(db, 'prospection')) return { ok: false, error: 'technologie Prospection planétaire requise' };
 
   const owned = db.prepare('SELECT COUNT(*) AS n FROM concessions').get().n;
-  if (owned >= FAC.MAX_CONCESSIONS) return { ok: false, error: `maximum ${FAC.MAX_CONCESSIONS} concessions` };
+  const max = maxConcessions(db);
+  if (owned >= max) return { ok: false, error: `maximum ${max} concessions (Prospection profonde pour aller plus loin)` };
 
   const planet = db.prepare('SELECT biome, name FROM planets WHERE id = ?').get(ship.planet_id);
   const extraction = BIOMES[planet.biome].extraction;

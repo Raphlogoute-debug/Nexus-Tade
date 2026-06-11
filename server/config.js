@@ -116,8 +116,18 @@ export const CONFIG = {
       WORKSHOP_COST_OVERRIDE: { antimatter: 30000, quantum_chips: 30000, jump_drives: 50000 },
       CONCESSION_BASE_PRICE: 25000, // 2e concession ; double à chaque suivante
       MAX_CONCESSIONS: 5,
+      MAX_CONCESSIONS_2: 10,   // tech Prospection profonde
       DEEP_MINING_MULT: 1.5,   // tech Forage profond
+      DEEP_MINING_2_MULT: 2.5, // tech Foreuses quantiques
       WAREHOUSE_TECH_MULT: 2,  // tech Entrepôts automatisés
+      WAREHOUSE_TECH_2_MULT: 4, // tech Stockage orbital
+      WORKSHOP_ENG_MULT: 2,    // tech Ingénierie d'ateliers
+      WORKSHOP_AUTO_MULT: 4,   // tech Ateliers automatisés
+      FOUND_MULT: 1.2,         // fonder une industrie coûte sa valorisation ×1.2
+      HOLDS_MULT: 1.25,        // tech Soutes modulaires
+      FUEL_SAVING_MULT: 0.7,   // tech Moteurs économes
+      NETWORK_RADIUS_MULT: 1.5, // tech Réseau de courtage (rumeurs)
+      NETWORK_INTEL_MULT: 0.5, // tech Réseau de courtage (relevés)
     },
 
     // Prestige : 1 point par tranche de profit réalisé, bonus par nouveau
