@@ -40,14 +40,24 @@ export function tickAutoShips(db, tick) {
   const accessible = (m) =>
     hasTierAccess(player, tierOf(m.population)) && marketOpen(db, m.faction_id);
 
+  // Les vaisseaux amarrés dans le même système partagent le scan : avec
+  // une grosse flotte concentrée sur quelques hubs, c'est l'essentiel du
+  // coût du tick qui disparaît.
+  const scanCache = new Map();
+  const scanFor = (systemId) => {
+    if (!scanCache.has(systemId)) {
+      scanCache.set(systemId, scan(db, systemId).filter(accessible));
+    }
+    return scanCache.get(systemId);
+  };
+
   for (const ship of ships) {
     // 1. Plein automatique quand le réservoir baisse.
     if (ship.fuel < ship.fuel_capacity * A.REFUEL_BELOW) {
       refuel(db, undefined, ship.id);
     }
 
-    const markets = scan(db, systemOf.get(ship.planet_id).system_id)
-      .filter(accessible);
+    const markets = scanFor(systemOf.get(ship.planet_id).system_id);
     const cargo = getCargo(db, ship.id);
 
     if (cargo.length > 0) {
@@ -60,7 +70,14 @@ export function tickAutoShips(db, tick) {
 
       const extraElsewhere = here && best.planet_id !== ship.planet_id
         ? (best.price - here.price) * main.quantity : -1;
-      if (here && extraElsewhere <= 0) {
+      // Vendre ici si c'est le meilleur marché — ou si le voyage est
+      // refusé (équipages impayés : on écoule pour renflouer la caisse).
+      let sellHere = here && extraElsewhere <= 0;
+      if (!sellHere && best.planet_id !== ship.planet_id) {
+        const trip = startTravel(db, best.planet_id, tick, ship.id);
+        if (!trip.ok && here) sellHere = true;
+      }
+      if (sellHere) {
         for (const lot of cargo) {
           const sale = executeTrade(db, {
             side: 'sell', resourceId: lot.resource_id, quantity: lot.quantity, shipId: ship.id,
@@ -71,8 +88,6 @@ export function tickAutoShips(db, tick) {
               + ` à ${sale.unitPrice} cr/u (+${Math.round(sale.total)} cr)`);
           }
         }
-      } else if (best.planet_id !== ship.planet_id) {
-        startTravel(db, best.planet_id, tick, ship.id);
       }
       continue;
     }

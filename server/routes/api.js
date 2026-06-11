@@ -17,7 +17,7 @@ import { BIOMES } from '../../data/biomes.js';
 import {
   initPlayer, getPlayer, getShip, getFleet, getCargo, cargoUsed, tierOf, hasTierAccess,
 } from '../player/state.js';
-import { buyShip, setShipMode } from '../player/shipyard.js';
+import { buyShip, setShipMode, fleetUpkeep } from '../player/shipyard.js';
 import { previewTrade, executeTrade, refuel, buyLicence } from '../player/trade.js';
 import { previewTravel, startTravel } from '../player/travel.js';
 import {
@@ -235,6 +235,7 @@ export function createApiRouter(db, clock) {
       ship: ships[0], // compatibilité : le vaisseau-amiral
       shipClasses: CONFIG.SHIPS.CLASSES,
       maxFleet: CONFIG.SHIPS.MAX_FLEET,
+      fleetUpkeep: fleetUpkeep(db),
       concessions,
       nextConcessionPrice: CONFIG.PLAYER.FACILITIES.CONCESSION_BASE_PRICE
         * 2 ** Math.max(0, concessions.length - 1),

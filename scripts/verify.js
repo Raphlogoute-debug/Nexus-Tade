@@ -585,6 +585,21 @@ check(fleetEvents > 0,
 check(autoShip.fuel <= autoShip.fuel_capacity && autoShip.fuel > 0,
   'le capitaine automatique gère son carburant (plein au marché local)');
 
+// L'entretien de flotte remplace le plafond : prélevé chaque tick, et le
+// découvert cloue les vaisseaux à quai.
+db.prepare("UPDATE ships SET mode = 'manual'").run(); // finances figées
+const upkeepCredits = getPlayer(db).credits;
+runTick(db);
+const expectedUpkeep = 4 + 2; // Cargo (4/tick) + Navette (2/tick)
+check(Math.abs(getPlayer(db).credits - (upkeepCredits - expectedUpkeep)) < 0.01,
+  `entretien de flotte : −${expectedUpkeep} cr/tick prélevés (Cargo 4 + Navette 2)`);
+
+db.prepare('UPDATE player SET credits = -50 WHERE id = 1').run();
+const grounded = startTravel(db, dest.id, getCurrentTick(db));
+check(!grounded.ok && grounded.error.includes('impayés'),
+  `découvert → flotte clouée à quai : « ${grounded.error} »`);
+db.prepare('UPDATE player SET credits = 5000 WHERE id = 1').run();
+
 // ══ Phase 6 : industrie joueur ═══════════════════════════════════
 
 console.log('\n■ Phase 6 — technologies, ateliers, concessions multiples\n');

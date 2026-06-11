@@ -11,11 +11,12 @@ export function buyShip(db, classId) {
   if (!cls) return { ok: false, error: 'classe de vaisseau inconnue' };
 
   const fleet = getFleet(db);
-  if (fleet.length >= SH.MAX_FLEET) return { ok: false, error: `flotte au maximum (${SH.MAX_FLEET})` };
+  if (fleet.length >= SH.MAX_FLEET) {
+    return { ok: false, error: `limite technique de ${SH.MAX_FLEET} vaisseaux atteinte` };
+  }
 
-  // L'achat se fait là où se trouve le vaisseau-amiral... non : là où se
-  // trouve N'IMPORTE quel vaisseau à quai sur un monde tier 2+. On prend
-  // le premier qui convient — le nouveau vaisseau y est livré.
+  // L'achat se fait là où se trouve N'IMPORTE quel vaisseau à quai sur un
+  // monde tier 2+. Le nouveau vaisseau y est livré.
   const dockyard = fleet.find((s) => {
     if (s.planet_id === null) return false;
     const pop = db.prepare('SELECT population FROM planets WHERE id = ?').get(s.planet_id).population;
@@ -28,7 +29,9 @@ export function buyShip(db, classId) {
   const player = getPlayer(db);
   if (player.credits < cls.price) return { ok: false, error: 'crédits insuffisants' };
 
-  const name = SH.NAMES[fleet.length % SH.NAMES.length];
+  const n = fleet.length;
+  const name = SH.NAMES[n % SH.NAMES.length]
+    + (n >= SH.NAMES.length ? ` ${Math.floor(n / SH.NAMES.length) + 1}` : '');
   let shipId;
   db.transaction(() => {
     adjustCredits(db, -cls.price);
@@ -38,7 +41,21 @@ export function buyShip(db, classId) {
     ).run(name, dockyard.planet_id, cls.cargo, cls.fuel, cls.fuel, cls.speed, classId).lastInsertRowid;
   })();
 
-  return { ok: true, shipId, name, classLabel: cls.label, price: cls.price, planetId: dockyard.planet_id };
+  return { ok: true, shipId, name, classLabel: cls.label, price: cls.price, upkeep: cls.upkeep, planetId: dockyard.planet_id };
+}
+
+// Entretien de la flotte, prélevé à chaque tick (peut mettre le compte en
+// découvert — la flotte reste alors à quai jusqu'à régularisation).
+export function fleetUpkeep(db) {
+  let total = 0;
+  for (const s of getFleet(db)) total += SH.CLASSES[s.class]?.upkeep ?? 0;
+  return total;
+}
+
+export function tickFleetUpkeep(db) {
+  const total = fleetUpkeep(db);
+  if (total > 0) adjustCredits(db, -total);
+  return total;
 }
 
 export function setShipMode(db, shipId, mode) {

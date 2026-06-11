@@ -3,7 +3,7 @@
 // trajet — les prix vus au départ ne sont pas garantis à l'arrivée.
 
 import { CONFIG } from '../config.js';
-import { getShip } from './state.js';
+import { getShip, getPlayer } from './state.js';
 import { systemDistance, recordFullSnapshot, recordGossipAround } from './knowledge.js';
 import { maybeSeizeCargo } from '../factions/standing.js';
 
@@ -15,6 +15,11 @@ export function previewTravel(db, destPlanetId, shipId) {
   const ship = getShip(db, shipId);
   if (!ship) return { ok: false, error: 'vaisseau inconnu' };
   if (ship.planet_id === null) return { ok: false, error: 'vaisseau déjà en transit' };
+  // L'entretien impayé cloue la flotte au sol : c'est lui, la vraie
+  // limite de taille de flotte.
+  if (getPlayer(db).credits < 0) {
+    return { ok: false, error: 'équipages impayés — régularisez vos comptes avant de repartir' };
+  }
 
   const dest = db.prepare('SELECT id, system_id FROM planets WHERE id = ?').get(destPlanetId);
   if (!dest) return { ok: false, error: 'planète inconnue' };

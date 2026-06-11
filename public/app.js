@@ -581,8 +581,8 @@ function renderDockedPanel(planet, market) {
       const disabled = state.player.credits < cls.price
         || state.player.ships.length >= state.player.maxFleet;
       html += `<button class="action-btn buy-ship" data-class="${classId}" ${disabled ? 'disabled' : ''}
-        title="soute ${cls.cargo} · vitesse ${cls.speed} · réservoir ${cls.fuel}">
-        ${cls.label} (${fmtQty(cls.price)} cr)</button>`;
+        title="soute ${cls.cargo} · vitesse ${cls.speed} · réservoir ${cls.fuel} · entretien ${cls.upkeep} cr/tick">
+        ${cls.label} (${fmtQty(cls.price)} cr · ${cls.upkeep}/tick)</button>`;
     }
     html += `</div>`;
   }
@@ -1013,7 +1013,9 @@ function renderHudPlayer() {
   const p = state.player;
   const ship = selectedShip();
   if (!p || !ship) return;
-  $('#hud-credits').textContent = `${fmtQty(p.credits)} cr`;
+  $('#hud-credits').textContent = `${fmtQty(p.credits)} cr`
+    + (p.fleetUpkeep > 0 ? ` (−${fmtNum.format(p.fleetUpkeep)}/tick)` : '');
+  $('#hud-credits').classList.toggle('price-high', p.credits < 0);
   const nextTier = !p.tiers[2].unlocked ? 2 : !p.tiers[3].unlocked ? 3 : null;
   $('#hud-prestige').textContent = fmtQty(p.prestige)
     + (nextTier ? ` / ${fmtQty(p.tiers[nextTier].prestigeRequired)} (T${nextTier})` : ' (T3 ✓)');

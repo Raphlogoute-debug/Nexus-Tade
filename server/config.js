@@ -232,13 +232,16 @@ export const CONFIG = {
   // ── Phase 5 : la flotte du joueur ────────────────────────────
 
   SHIPS: {
+    // upkeep : crédits par tick (équipage, maintenance). C'est l'entretien
+    // qui limite la taille de la flotte, pas un plafond arbitraire — en
+    // découvert, les équipages refusent de repartir.
     CLASSES: {
-      courier: { label: 'Navette', cargo: 100, speed: 220, fuel: 300, price: 8000 },
-      freighter: { label: 'Cargo', cargo: 250, speed: 150, fuel: 400, price: 20000 },
-      hauler: { label: 'Vraquier', cargo: 700, speed: 100, fuel: 600, price: 60000 },
+      courier: { label: 'Navette', cargo: 100, speed: 220, fuel: 300, price: 8000, upkeep: 2 },
+      freighter: { label: 'Cargo', cargo: 250, speed: 150, fuel: 400, price: 20000, upkeep: 4 },
+      hauler: { label: 'Vraquier', cargo: 700, speed: 100, fuel: 600, price: 60000, upkeep: 10 },
     },
     BUY_MIN_TIER: 2, // les chantiers civils sont sur les mondes établis
-    MAX_FLEET: 8,
+    MAX_FLEET: 100,  // garde-fou purement technique
     NAMES: ['Le Colporteur', 'La Fortune', 'Le Tenace', "L'Opportun", 'Le Frugal',
       'La Comète', "L'Habile", 'Le Discret'],
   },
