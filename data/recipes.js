@@ -1,6 +1,9 @@
+import { RESOURCES } from './resources.js';
+
 // Chaînes de production : chaque recette est indexée par la ressource
-// qu'elle produit. `inputs` = quantités consommées par run,
-// `output` = quantité produite par run.
+// qu'elle produit (ou par un identifiant d'industrie pour les filières
+// alternatives, avec `produces`). `inputs` = quantités consommées par
+// run, `output` = quantité produite par run.
 //
 // Une planète qui possède une industrie pour une recette tente de
 // l'exécuter `rate` fois par tick — limité par les stocks d'entrée
@@ -31,6 +34,43 @@ export const RECIPES = {
   adv_components: { inputs: { ceramics: 1, electronics: 1 }, output: 1 },
   jump_drives: { inputs: { antimatter: 1, quantum_chips: 1, alloys: 2 }, output: 1 },
   sensors: { inputs: { rare_earths: 1, electronics: 1 }, output: 1 },
+
+  // ── Industries alternatives ────────────────────────────────────
+  // Un même produit, plusieurs filières : intrants et rendements
+  // différents. La clé est un identifiant d'industrie ; `produces`
+  // désigne la ressource réellement produite, `name` le nom d'usine.
+  steel_titanium: {
+    name: 'Aciérie composite', produces: 'steel',
+    inputs: { titanium_ore: 1, iron_ore: 1 }, output: 2,
+  },
+  fuel_deuterium: {
+    name: 'Raffinerie au deutérium', produces: 'fuel',
+    inputs: { deuterium: 2 }, output: 2,
+  },
+  electronics_rare: {
+    name: 'Électronique aux terres rares', produces: 'electronics',
+    inputs: { rare_earths: 1, silicon: 1 }, output: 2,
+  },
+  synth_food_biomass: {
+    name: 'Bioréacteurs', produces: 'synth_food',
+    inputs: { biomass: 2, water: 1 }, output: 4,
+  },
+  meds_bio: {
+    name: 'Biopharma', produces: 'meds',
+    inputs: { biomass: 2, spices: 1 }, output: 2,
+  },
+  gem_cutting: {
+    name: 'Taillerie de gemmes', produces: 'luxury_goods',
+    inputs: { gemstones: 2 }, output: 1,
+  },
 };
+
+// Ressource produite par une recette (la clé elle-même par défaut).
+export const recipeOutput = (recipeId) => RECIPES[recipeId].produces ?? recipeId;
+
+// Nom d'affichage : nom d'usine pour les filières alternatives, nom de
+// la ressource pour les recettes classiques.
+export const recipeName = (recipeId) =>
+  RECIPES[recipeId].name ?? RESOURCES[recipeOutput(recipeId)].name;
 
 export const RECIPE_IDS = Object.keys(RECIPES);

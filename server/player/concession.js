@@ -11,7 +11,7 @@
 
 import { CONFIG } from '../config.js';
 import { RESOURCES } from '../../data/resources.js';
-import { RECIPES } from '../../data/recipes.js';
+import { RECIPES, recipeOutput, recipeName } from '../../data/recipes.js';
 import { BIOMES } from '../../data/biomes.js';
 import { getShip, getPlayer, cargoUsed, adjustCredits, tierOf } from './state.js';
 import { hasTech, unlockedRecipes } from './tech.js';
@@ -46,7 +46,8 @@ function enrich(db, c) {
       'SELECT recipe_id FROM facility_workshops WHERE concession_id = ? ORDER BY recipe_id'
     ).all(c.id).map((w) => ({
       recipe_id: w.recipe_id,
-      name: RESOURCES[w.recipe_id].name,
+      name: recipeName(w.recipe_id),
+      produces: recipeOutput(w.recipe_id),
       inputs: RECIPES[w.recipe_id].inputs,
       output: RECIPES[w.recipe_id].output,
       rate: FAC.WORKSHOP_RATE * workshopMult,
@@ -111,8 +112,8 @@ export function tickConcessions(db) {
           stock.set(inputId, stock.get(inputId) - qty * runs);
         }
         const produced = Math.round(w.output * runs * 100) / 100;
-        upsert.run(c.id, w.recipe_id, produced);
-        stock.set(w.recipe_id, (stock.get(w.recipe_id) ?? 0) + produced);
+        upsert.run(c.id, w.produces, produced);
+        stock.set(w.produces, (stock.get(w.produces) ?? 0) + produced);
         used += netSpace * runs;
       }
     }
@@ -234,7 +235,7 @@ export function installWorkshop(db, concessionId, recipeId) {
   }
 
   const cost = FAC.WORKSHOP_COST_OVERRIDE[recipeId]
-    ?? FAC.WORKSHOP_COST[RESOURCES[recipeId].tier];
+    ?? FAC.WORKSHOP_COST[RESOURCES[recipeOutput(recipeId)].tier];
   if (getPlayer(db).credits < cost) return { ok: false, error: `crédits insuffisants (${cost} cr)` };
 
   db.transaction(() => {
@@ -243,5 +244,5 @@ export function installWorkshop(db, concessionId, recipeId) {
       'INSERT INTO facility_workshops (concession_id, recipe_id) VALUES (?, ?)'
     ).run(concessionId, recipeId);
   })();
-  return { ok: true, recipeId, name: RESOURCES[recipeId].name, cost };
+  return { ok: true, recipeId, name: recipeName(recipeId), cost };
 }

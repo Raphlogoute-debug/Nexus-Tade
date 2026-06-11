@@ -27,7 +27,7 @@ import { createRoute, assignRoute, deleteRoute } from '../server/player/routes.j
 import { investIndustry, divestIndustry, foundIndustry } from '../server/player/investments.js';
 import { issueLoan } from '../server/factions/loans.js';
 import { buyFalseFlag } from '../server/player/smuggling.js';
-import { RECIPES as ALL_RECIPES } from '../data/recipes.js';
+import { RECIPES as ALL_RECIPES, recipeOutput } from '../data/recipes.js';
 
 const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
 import { generateFactions } from '../server/factions/generate.js';
@@ -96,18 +96,29 @@ const rows = db.prepare(
 
 for (const r of rows) {
   let demand = r.consumption;
+  let industryOut = 0;
   for (const ind of industriesByPlanet.get(r.planet_id) ?? []) {
     demand += (RECIPES[ind.recipe_id].inputs[r.resource_id] ?? 0) * ind.rate;
+    if (recipeOutput(ind.recipe_id) === r.resource_id) {
+      industryOut += RECIPES[ind.recipe_id].output * ind.rate;
+    }
   }
-  r.netFlow = r.production - demand;
+  r.netFlow = r.production + industryOut - demand;
+  r.industryOut = industryOut;
   r.priceRatio = r.price / RESOURCES[r.resource_id].basePrice;
 }
 
 const headroom = (r) => r.priceRatio > 0.45 && r.priceRatio < 2.5;
 const surplusCase = rows.filter((r) => r.netFlow > 1 && headroom(r))
   .sort((a, b) => b.netFlow - a.netFlow)[0];
-const shortageCase = rows.filter((r) => r.netFlow < -1 && headroom(r))
-  .sort((a, b) => a.netFlow - b.netFlow)[0];
+// Pénurie pilotée par la consommation CIVILE (toujours effective), nette
+// de TOUTE production locale, extraction comme industrie — la demande
+// industrielle à plein régime peut être un mirage si l'usine est à
+// l'arrêt, mais sa production en est un aussi : on l'inclut côté offre
+// (sélection prudente) et on exige un vrai déficit.
+const civilShort = (r) => r.consumption - r.production - r.industryOut;
+const shortageCase = rows.filter((r) => civilShort(r) > 1 && headroom(r))
+  .sort((a, b) => civilShort(b) - civilShort(a))[0];
 
 check(Boolean(surplusCase), 'au moins un marché en surplus net trouvé');
 check(Boolean(shortageCase), 'au moins un marché en pénurie nette trouvée');
@@ -958,6 +969,56 @@ const creditsFound = getPlayer(db).credits;
 for (let i = 0; i < 5; i++) runTick(db);
 check(getPlayer(db).credits > creditsFound - 5 * 6,
   'l\'usine fondée tourne (biomasse locale) et verse déjà ses dividendes');
+
+// ── Industries alternatives : un même produit, plusieurs filières ─
+
+console.log('\n■ Industries alternatives\n');
+
+const altIds = ['steel_titanium', 'fuel_deuterium', 'electronics_rare',
+  'synth_food_biomass', 'meds_bio', 'gem_cutting'];
+const altCount = db.prepare(
+  `SELECT COUNT(*) AS n FROM planet_industries WHERE recipe_id IN (${altIds.map(() => '?').join(',')})`
+).get(...altIds).n;
+check(altCount > 0,
+  `la génération assigne les filières alternatives : ${altCount} usines (Bioréacteurs, Aciéries composites…)`);
+
+// Atelier alternatif sur concession : l'Aciérie composite produit bien
+// de l'ACIER (titane + fer importés) dans l'entrepôt du site n°2.
+const altShop = installWorkshop(db, second.id, 'steel_titanium');
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?')
+  .run(listConcessions(db).find((x) => x.id === second.id).planet_id, flagship.id);
+for (const [rid, qty] of [['titanium_ore', 60], ['iron_ore', 60]]) {
+  db.prepare(
+    `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, ?, ?, 10)
+     ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = ?, avg_cost = 10`
+  ).run(flagship.id, rid, qty, qty);
+  depositToConcession(db, rid, qty, flagship.id);
+}
+for (let i = 0; i < 4; i++) runTick(db);
+const steelAtSite2 = listConcessions(db).find((x) => x.id === second.id)
+  .storage.find((s) => s.resource_id === 'steel');
+check(altShop.ok && Boolean(steelAtSite2) && steelAtSite2.quantity > 0,
+  `atelier ${altShop.name} : titane + fer importés → ${steelAtSite2?.quantity.toFixed(0)} ACIERS à l'entrepôt`);
+
+// Fonder des Bioréacteurs (filière Biosynthèse) sur le monde à biomasse :
+// le moteur route la production vers la nourriture synthétique.
+researchTech(db, 'biotech');
+const bioSite = db.prepare(
+  `SELECT p.id, p.name FROM planets p
+   JOIN systems s ON s.id = p.system_id
+   JOIN planet_resources pr ON pr.planet_id = p.id AND pr.resource_id = 'biomass' AND pr.production > 5
+   WHERE (s.faction_id IS NULL OR s.faction_id != ?) AND p.population > 100
+     AND NOT EXISTS (SELECT 1 FROM planet_industries pi
+                     WHERE pi.planet_id = p.id AND pi.recipe_id = 'synth_food_biomass')
+   LIMIT 1`
+).get(defender.id);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(bioSite.id, flagship.id);
+const bioFactory = foundIndustry(db, 'synth_food_biomass', flagship.id);
+const tickResult = runTick(db);
+const bioRuns = tickResult.industryRuns.find(
+  (r) => r.planet_id === bioSite.id && r.recipe_id === 'synth_food_biomass');
+check(bioFactory.ok && Boolean(bioRuns) && bioRuns.runs > 0,
+  bioFactory.ok && `Bioréacteurs fondés sur ${bioFactory.planetName} : ${bioRuns?.runs.toFixed(1)} runs au premier tick → nourriture synthétique`);
 
 db.close();
 console.log(failures

@@ -6,7 +6,7 @@
 
 import { CONFIG } from '../config.js';
 import { RESOURCES } from '../../data/resources.js';
-import { RECIPES } from '../../data/recipes.js';
+import { RECIPES, recipeOutput, recipeName } from '../../data/recipes.js';
 import { getPlayer, getShip, adjustCredits, tierOf, hasTierAccess } from './state.js';
 import { marketOpen } from '../factions/standing.js';
 import { hasTech, unlockedRecipes } from './tech.js';
@@ -17,7 +17,7 @@ const INV = CONFIG.PLAYER.INVEST;
 // amorti sur PAYBACK_TICKS au taux de marge des dividendes.
 export function industryValuation(recipeId, rate) {
   const recipe = RECIPES[recipeId];
-  const grossPerTick = rate * recipe.output * RESOURCES[recipeId].basePrice;
+  const grossPerTick = rate * recipe.output * RESOURCES[recipeOutput(recipeId)].basePrice;
   return Math.round(grossPerTick * INV.DIVIDEND_MARGIN * INV.PAYBACK_TICKS);
 }
 
@@ -36,11 +36,11 @@ export function listInvestments(db) {
      ORDER BY ish.planet_id`
   ).all().map((i) => ({
     ...i,
-    name: RESOURCES[i.recipe_id].name,
+    name: recipeName(i.recipe_id),
     valuation: industryValuation(i.recipe_id, i.rate),
     // estimation à plein régime — le réel dépend des pénuries
     estimatedYield: Math.round(i.rate * RECIPES[i.recipe_id].output
-      * RESOURCES[i.recipe_id].basePrice * INV.DIVIDEND_MARGIN * i.share * 100) / 100,
+      * RESOURCES[recipeOutput(i.recipe_id)].basePrice * INV.DIVIDEND_MARGIN * i.share * 100) / 100,
   }));
 }
 
@@ -85,7 +85,7 @@ export function investIndustry(db, recipeId, share, shipId) {
   })();
 
   return {
-    ok: true, planetName: planet.name, recipeId, name: RESOURCES[recipeId].name,
+    ok: true, planetName: planet.name, recipeId, name: recipeName(recipeId),
     share: getShare(db, planet.id, recipeId), cost,
   };
 }
@@ -107,7 +107,7 @@ export function divestIndustry(db, recipeId, shipId) {
     db.prepare('DELETE FROM industry_shares WHERE planet_id = ? AND recipe_id = ?')
       .run(ship.planet_id, recipeId);
   })();
-  return { ok: true, refund, name: RESOURCES[recipeId].name };
+  return { ok: true, refund, name: recipeName(recipeId) };
 }
 
 // Fonder une industrie planétaire (Charte industrielle) : vous apportez
@@ -164,7 +164,7 @@ export function foundIndustry(db, recipeId, shipId) {
   })();
 
   return {
-    ok: true, planetName: planet.name, recipeId, name: RESOURCES[recipeId].name,
+    ok: true, planetName: planet.name, recipeId, name: recipeName(recipeId),
     rate, cost, share: INV.MAX_SHARE,
   };
 }
@@ -183,7 +183,7 @@ export function tickDividends(db, industryRuns) {
   for (const ind of industryRuns) {
     const share = byKey.get(`${ind.planet_id}:${ind.recipe_id}`);
     if (!share || !(ind.runs > 0)) continue;
-    const price = priceOf.get(ind.planet_id, ind.recipe_id).price;
+    const price = priceOf.get(ind.planet_id, recipeOutput(ind.recipe_id)).price;
     paid += ind.runs * RECIPES[ind.recipe_id].output * price * INV.DIVIDEND_MARGIN * share;
   }
   if (paid > 0) adjustCredits(db, Math.round(paid * 100) / 100);

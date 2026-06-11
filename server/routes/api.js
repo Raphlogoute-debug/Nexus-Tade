@@ -11,7 +11,7 @@ import { getMeta, setMeta, getCurrentTick, wipe } from '../db.js';
 import { generateUniverse } from '../universe/generator.js';
 import { randomSeed } from '../universe/rng.js';
 import { planetSnapshot } from '../economy/engine.js';
-import { RECIPES } from '../../data/recipes.js';
+import { RECIPES, recipeOutput, recipeName } from '../../data/recipes.js';
 import { RESOURCES } from '../../data/resources.js';
 import { BIOMES } from '../../data/biomes.js';
 import {
@@ -132,7 +132,8 @@ export function createApiRouter(db, clock) {
         'SELECT recipe_id, rate FROM planet_industries WHERE planet_id = ? ORDER BY recipe_id'
       ).all(id).map((i) => ({
         ...i,
-        name: RESOURCES[i.recipe_id].name,
+        name: recipeName(i.recipe_id),
+        produces: recipeOutput(i.recipe_id),
         inputs: RECIPES[i.recipe_id].inputs,
         output: RECIPES[i.recipe_id].output,
         valuation: industryValuation(i.recipe_id, i.rate),
@@ -151,7 +152,7 @@ export function createApiRouter(db, clock) {
           .filter((r) => !existing.has(r))
           .map((r) => ({
             recipe_id: r,
-            name: RESOURCES[r].name,
+            name: recipeName(r),
             cost: Math.round(industryValuation(r, rate) * CONFIG.PLAYER.FACILITIES.FOUND_MULT),
           }));
       }
@@ -270,8 +271,10 @@ export function createApiRouter(db, clock) {
         const FAC = CONFIG.PLAYER.FACILITIES;
         return Object.keys(RECIPES).map((rid) => ({
           recipe_id: rid,
-          name: RESOURCES[rid].name,
-          cost: FAC.WORKSHOP_COST_OVERRIDE[rid] ?? FAC.WORKSHOP_COST[RESOURCES[rid].tier],
+          name: recipeName(rid),
+          produces: recipeOutput(rid),
+          cost: FAC.WORKSHOP_COST_OVERRIDE[rid]
+            ?? FAC.WORKSHOP_COST[RESOURCES[recipeOutput(rid)].tier],
           unlocked: unlocked.has(rid),
         }));
       })(),

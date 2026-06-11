@@ -16,7 +16,7 @@
 
 import { CONFIG } from '../config.js';
 import { RESOURCES, RESOURCE_IDS } from '../../data/resources.js';
-import { RECIPES } from '../../data/recipes.js';
+import { RECIPES, recipeOutput } from '../../data/recipes.js';
 import { targetStock, nextPrice } from './pricing.js';
 import { compressionFactor, VITAL_SET } from './needs.js';
 import { getCurrentTick, setMeta } from '../db.js';
@@ -142,7 +142,7 @@ function simulatePlanet(planet) {
     for (const [inputId, qty] of Object.entries(recipe.inputs)) {
       stocks.get(inputId).stock -= qty * runs;
     }
-    stocks.get(industry.recipe_id).stock += recipe.output * runs;
+    stocks.get(recipeOutput(industry.recipe_id)).stock += recipe.output * runs;
   }
 
   // 3. Consommation civile : élastique au prix (on se rationne quand c'est

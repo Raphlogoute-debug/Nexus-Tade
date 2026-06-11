@@ -3,7 +3,7 @@
 
 import { CONFIG } from '../config.js';
 import { RESOURCES, RESOURCE_IDS } from '../../data/resources.js';
-import { RECIPES, RECIPE_IDS } from '../../data/recipes.js';
+import { RECIPES, RECIPE_IDS, recipeOutput } from '../../data/recipes.js';
 import { BIOMES, BIOME_IDS } from '../../data/biomes.js';
 import { createRng } from './rng.js';
 import { equilibriumPrice, targetStock } from '../economy/pricing.js';
@@ -98,7 +98,7 @@ function industriesFor(rng, production, popM) {
       (E.INDUSTRY_BASE_RATE + E.INDUSTRY_POP_COEF * popM) * rng.float(0.6, 1.4)
     );
     chosen.push({ recipeId: best, rate });
-    localOutputs.add(best); // les recettes suivantes peuvent chaîner dessus
+    localOutputs.add(recipeOutput(best)); // les recettes suivantes peuvent chaîner dessus
   }
   return chosen;
 }

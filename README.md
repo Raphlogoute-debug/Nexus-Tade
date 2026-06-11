@@ -208,6 +208,16 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   leurs débouchés : plaques de coque, combustible nucléaire, engrais,
   cellules à fusion, capteurs ; filières rattachées à l'arbre techno
 
+**Industries alternatives : un même produit, plusieurs filières**
+- 6 industries alternatives (`data/recipes.js`, champ `produces`) :
+  Aciérie composite (titane+fer → 2 aciers), Raffinerie au deutérium,
+  Électronique aux terres rares, Bioréacteurs (biomasse+eau → 4
+  nourritures), Biopharma, Taillerie de gemmes (→ biens de luxe)
+- La génération les assigne naturellement (~280 usines par univers, sur
+  les mondes qui extraient leurs intrants) ; fondables et installables en
+  atelier via les filières techno existantes ; investissables comme les
+  autres — 32 recettes au total
+
 **Arbre technologique étendu : 19 technologies**
 - **Charte industrielle** : fonder de NOUVELLES industries planétaires sur
   n'importe quel monde accessible — vous apportez les plans (filière
