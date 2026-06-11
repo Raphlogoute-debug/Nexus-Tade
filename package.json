@@ -1,0 +1,18 @@
+{
+  "name": "nexus-trade",
+  "version": "0.1.0",
+  "description": "Nexus Trade — simulation économique et politique spatiale (Phase 1 : univers procédural + moteur économique)",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "verify": "node scripts/verify.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "express": "^4.21.2"
+  }
+}

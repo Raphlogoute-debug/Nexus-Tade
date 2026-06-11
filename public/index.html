@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nexus Trade</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>NEXUS<span>TRADE</span></h1>
+    <div class="header-stats">
+      <span class="stat">TICK <strong id="hud-tick">—</strong></span>
+      <span class="stat">SEED <strong id="hud-seed">—</strong></span>
+      <span class="stat"><strong id="hud-counts">—</strong></span>
+    </div>
+  </header>
+
+  <main>
+    <aside id="panel">
+      <div id="panel-content">
+        <p class="hint">Cliquez sur un système de la carte pour voir ses planètes,
+        puis sur une planète pour suivre ses stocks et ses prix en direct.</p>
+      </div>
+    </aside>
+
+    <section id="map-wrap">
+      <canvas id="map"></canvas>
+      <div id="tooltip" hidden></div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
