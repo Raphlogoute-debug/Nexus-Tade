@@ -12,7 +12,7 @@ import { generateUniverse } from '../universe/generator.js';
 import { randomSeed } from '../universe/rng.js';
 import { planetSnapshot } from '../economy/engine.js';
 import { RECIPES, recipeOutput, recipeName } from '../../data/recipes.js';
-import { RESOURCES } from '../../data/resources.js';
+import { RESOURCES, RESOURCE_IDS } from '../../data/resources.js';
 import { BIOMES } from '../../data/biomes.js';
 import {
   initPlayer, getPlayer, getShip, getFleet, getCargo, cargoUsed, tierOf, hasTierAccess,
@@ -97,7 +97,108 @@ export function createApiRouter(db, clock) {
       mapSize: CONFIG.UNIVERSE.MAP_SIZE,
       systems: [...bySystem.values()],
       factions,
+      resources: RESOURCE_IDS.map((id) => ({
+        id, name: RESOURCES[id].name, tier: RESOURCES[id].tier, basePrice: RESOURCES[id].basePrice,
+      })),
     });
+  });
+
+  // ── GET /api/market-scan/:resourceId : tout ce que le joueur SAIT
+  // d'une ressource, à travers la galaxie (alimente carte thermique +
+  // comparateur d'arbitrage). Respecte le brouillard : uniquement les
+  // marchés déjà observés (known_prices).
+  router.get('/market-scan/:resourceId', (req, res) => {
+    const resourceId = req.params.resourceId;
+    if (!RESOURCES[resourceId]) return res.status(400).json({ error: 'ressource inconnue' });
+
+    const tick = getCurrentTick(db);
+    const rows = db.prepare(
+      `SELECT kp.planet_id, kp.price, kp.stock, kp.seen_tick,
+              p.name AS planet_name, p.system_id, p.population,
+              s.name AS system_name, s.x, s.y, s.faction_id
+       FROM known_prices kp
+       JOIN planets p ON p.id = kp.planet_id
+       JOIN systems s ON s.id = p.system_id
+       WHERE kp.resource_id = ?`
+    ).all(resourceId);
+
+    res.json({
+      resourceId,
+      name: RESOURCES[resourceId].name,
+      basePrice: RESOURCES[resourceId].basePrice,
+      tick,
+      markets: rows.map((r) => ({
+        planetId: r.planet_id,
+        planetName: r.planet_name,
+        systemId: r.system_id,
+        systemName: r.system_name,
+        x: r.x, y: r.y,
+        factionId: r.faction_id,
+        tier: tierOf(r.population),
+        price: r.price,
+        stock: r.stock,
+        ageTicks: tick - r.seen_tick,
+      })),
+    });
+  });
+
+  // ── GET /api/alerts : ce qui réclame votre attention maintenant ─
+  router.get('/alerts', (req, res) => {
+    const player = getPlayer(db);
+    const alerts = [];
+
+    if (player.credits < 0) {
+      alerts.push({ level: 'crit',
+        message: `Découvert (${Math.round(player.credits)} cr) — vos vaisseaux restent à quai` });
+    } else {
+      const upkeep = fleetUpkeep(db);
+      const divs = listInvestments(db).reduce((s, i) => s + i.estimatedYield, 0);
+      const net = divs - upkeep;
+      if (net < 0 && player.credits < -net * 60) {
+        alerts.push({ level: 'warn',
+          message: `Trésorerie à sec dans ~${Math.floor(player.credits / -net)} ticks (${Math.round(net)}/tick)` });
+      }
+    }
+
+    // Réputation : marchés fermés.
+    const blacklisted = db.prepare(
+      `SELECT f.name FROM faction_standing fs JOIN factions f ON f.id = fs.faction_id
+       WHERE fs.standing <= ?`
+    ).all(CONFIG.STANDING.BLACKLIST);
+    for (const f of blacklisted) {
+      alerts.push({ level: 'warn', message: `Liste noire chez ${f.name} — leurs marchés vous sont fermés` });
+    }
+
+    // Concessions : entrepôt saturé, ou guerre sur le système.
+    const ctx = warContext(db);
+    for (const c of listConcessions(db)) {
+      const meta = db.prepare(
+        `SELECT p.name, p.system_id, s.faction_id FROM planets p
+         JOIN systems s ON s.id = p.system_id WHERE p.id = ?`
+      ).get(c.planet_id);
+      if (c.cap > 0 && c.used / c.cap >= 0.95) {
+        alerts.push({ level: 'warn', planetId: c.planet_id,
+          message: `Entrepôt saturé sur ${meta.name} — production perdue` });
+      }
+      if (ctx.frontSystems.has(meta.system_id)) {
+        alerts.push({ level: 'crit', planetId: c.planet_id,
+          message: `⚔ Front de guerre sur le système de votre concession (${meta.name})` });
+      } else if (meta.faction_id !== null && ctx.factionWar.has(meta.faction_id)) {
+        alerts.push({ level: 'warn', planetId: c.planet_id,
+          message: `La faction de votre concession ${meta.name} est en guerre` });
+      }
+    }
+
+    // Vaisseaux automatiques à sec de carburant et incapables de bouger.
+    for (const ship of getFleet(db)) {
+      if (ship.mode !== 'manual' && ship.planet_id !== null
+        && ship.fuel < 5 && player.credits < 100) {
+        alerts.push({ level: 'warn', planetId: ship.planet_id,
+          message: `${ship.name} est immobilisé (carburant + crédits au plus bas)` });
+      }
+    }
+
+    res.json(alerts);
   });
 
   // ── GET /api/planet/:id : fiche publique + économie si à quai ──

@@ -126,6 +126,61 @@ main { flex: 1; display: flex; min-height: 0; }
 
 #map { display: block; width: 100%; height: 100%; cursor: crosshair; }
 
+/* ── Barre d'alertes ───────────────────────────────────────── */
+
+#alerts-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 18px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.alert {
+  font-size: 11px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  cursor: default;
+  white-space: nowrap;
+}
+.alert.warn { color: var(--amber); border-color: var(--amber); }
+.alert.crit { color: var(--red); border-color: var(--red); }
+.alert[data-planet] { cursor: pointer; }
+
+/* ── Légende de la carte thermique ─────────────────────────── */
+
+#heat-legend {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  font-size: 11px;
+  color: var(--dim);
+  z-index: 3;
+}
+#heat-legend #heat-label { color: var(--accent); }
+.heat-grad {
+  width: 90px;
+  height: 8px;
+  background: linear-gradient(to right, hsl(130,70%,50%), hsl(60,70%,50%), hsl(0,70%,52%));
+}
+.heat-ends { display: flex; flex-direction: column; line-height: 1.1; font-size: 9px; }
+#heat-off {
+  background: none; border: 1px solid var(--border); color: var(--dim);
+  font-family: inherit; cursor: pointer; padding: 0 5px;
+}
+#heat-off:hover { color: var(--accent); border-color: var(--accent); }
+
+.market-row td { cursor: default; }
+.market-row.buy td:nth-child(2) { color: var(--green); }
+.market-row.sell td:nth-child(2) { color: var(--red); }
+.goto-link { color: var(--accent); cursor: pointer; }
+
 #tooltip {
   position: absolute;
   pointer-events: none;

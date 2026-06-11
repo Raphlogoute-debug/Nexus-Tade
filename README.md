@@ -208,6 +208,19 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   leurs débouchés : plaques de coque, combustible nucléaire, engrais,
   cellules à fusion, capteurs ; filières rattachées à l'arbre techno
 
+**Outils de lisibilité (carte thermique, arbitrage, alertes)**
+- **Comparateur de marchés** (bouton MARCHÉS) : pour une ressource, table
+  de tous vos marchés connus triés par prix (la meilleure occasion d'achat
+  en vert, de vente en rouge), avec stock, fraîcheur de la donnée et
+  distance — la marge brute repérable d'un coup d'œil ; cliquer un marché
+  y navigue
+- **Carte thermique** : depuis le comparateur, colorez la galaxie par prix
+  connu de la ressource choisie (vert bon marché → rouge cher) ; respecte
+  le brouillard (seuls les marchés observés sont colorés)
+- **Alertes** (barre sous la flotte) : découvert, trésorerie bientôt à sec,
+  liste noire, entrepôt saturé, guerre sur le système d'une concession,
+  vaisseau immobilisé — cliquer une alerte localisée ouvre la planète
+
 **Industries alternatives : un même produit, plusieurs filières**
 - 6 industries alternatives (`data/recipes.js`, champ `produces`) :
   Aciérie composite (titane+fer → 2 aciers), Raffinerie au deutérium,
@@ -276,6 +289,8 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `GET /api/factions` · `GET /api/faction/:id` | royaumes : territoire, flotte, diplomatie, guerre, réputation, contrats |
 | `GET /api/contracts` · `POST /api/contracts/:id/deliver` | appels d'offres de faction et livraison |
 | `GET /api/events?since=id` | fil d'événements du monde (guerres, conquêtes, saisies, flotte) |
+| `GET /api/market-scan/:resourceId` | tous vos marchés connus d'une ressource (arbitrage + heatmap) |
+| `GET /api/alerts` | ce qui réclame votre attention (découvert, guerre, entrepôt saturé…) |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |
 | `POST /api/concession/collect` · `/deposit` · `/upgrade` | transferts entrepôt↔soute, amélioration |

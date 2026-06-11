@@ -24,6 +24,7 @@
     <span class="hud-item" id="hud-location">—</span>
     <button id="btn-tech" class="time-btn" title="Arbre technologique">TECH</button>
     <button id="btn-routes" class="time-btn" title="Routes logistiques">ROUTES</button>
+    <button id="btn-markets" class="time-btn" title="Comparateur de marchés / arbitrage">MARCHÉS</button>
     <span id="time-controls">
       <button class="time-btn" data-speed="0" title="Pause">⏸</button>
       <button class="time-btn" data-speed="1" title="Vitesse normale">×1</button>
@@ -34,6 +35,7 @@
   </div>
 
   <div id="fleet-bar"></div>
+  <div id="alerts-bar" hidden></div>
 
   <main>
     <aside id="panel">
@@ -50,6 +52,12 @@
     <section id="map-wrap">
       <canvas id="map"></canvas>
       <div id="tooltip" hidden></div>
+      <div id="heat-legend" hidden>
+        <span id="heat-label"></span>
+        <span class="heat-grad"></span>
+        <span class="heat-ends"><span>bon marché</span><span>cher</span></span>
+        <button id="heat-off">✕</button>
+      </div>
     </section>
   </main>
 

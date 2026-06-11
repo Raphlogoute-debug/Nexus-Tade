@@ -59,6 +59,8 @@ const state = {
   lastEventId: 0,
   selectedShipId: null, // vaisseau piloté (les commandes s'appliquent à lui)
   prevShips: new Map(), // pour détecter les arrivées
+  heatmap: null, // { resourceId, name, basePrice, bySystem: Map(systemId → ratio) }
+  marketSel: 'iron_ore', // ressource du comparateur de marchés
 };
 
 function selectedShip() {
@@ -144,6 +146,13 @@ function shipMapPosition(ship) {
   };
 }
 
+// Couleur thermique : ratio prix/base ∈ [~0,7 ; ~1,3] → vert (bon marché)
+// au rouge (cher), via le jaune (prix de base).
+function heatColor(ratio) {
+  const t = Math.min(1, Math.max(0, (ratio - 0.7) / 0.6));
+  return `hsl(${Math.round(130 * (1 - t))}, 72%, 53%)`;
+}
+
 function drawMap() {
   const rect = canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
@@ -165,15 +174,32 @@ function drawMap() {
     const isSelected = state.selectedSystem?.id === sys.id;
     const isHover = state.hoverSystem?.id === sys.id;
 
-    ctx.globalAlpha = isHover || isSelected ? 1 : knowledgeAlpha(sys.id);
-    ctx.beginPath();
-    ctx.arc(sx, sy, r, 0, Math.PI * 2);
-    ctx.fillStyle = STAR_COLORS[sys.id % STAR_COLORS.length];
-    ctx.shadowColor = ctx.fillStyle;
-    ctx.shadowBlur = isHover || isSelected ? 14 : 6;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
+    // Carte thermique : couleur = prix connu d'une ressource (vert bon
+    // marché → rouge cher). Les systèmes sans donnée connue restent éteints.
+    if (state.heatmap) {
+      const ratio = state.heatmap.bySystem.get(sys.id);
+      if (ratio === undefined) {
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = '#5b6577';
+      } else {
+        ctx.globalAlpha = isHover || isSelected ? 1 : 0.92;
+        ctx.fillStyle = heatColor(ratio);
+      }
+      ctx.beginPath();
+      ctx.arc(sx, sy, r + (ratio !== undefined ? 1.5 : 0), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.globalAlpha = isHover || isSelected ? 1 : knowledgeAlpha(sys.id);
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = STAR_COLORS[sys.id % STAR_COLORS.length];
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = isHover || isSelected ? 14 : 6;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
 
     if (isSelected) {
       ctx.beginPath();
@@ -908,6 +934,112 @@ async function renderRemotePanel(planet, market) {
   }
 }
 
+// ── Panneau : comparateur de marchés (arbitrage + carte thermique) ─
+
+// Agrège un scan en heatmap par système : meilleur prix connu (le plus
+// bas = la meilleure occasion d'achat) rapporté au prix de base.
+function buildHeatmap(scan) {
+  const best = new Map(); // systemId → meilleur (plus bas) prix
+  for (const m of scan.markets) {
+    if (!best.has(m.systemId) || m.price < best.get(m.systemId)) best.set(m.systemId, m.price);
+  }
+  const bySystem = new Map();
+  for (const [sysId, price] of best) bySystem.set(sysId, price / scan.basePrice);
+  return { resourceId: scan.resourceId, name: scan.name, basePrice: scan.basePrice, bySystem };
+}
+
+function updateHeatLegend() {
+  const el = $('#heat-legend');
+  if (state.heatmap) {
+    el.hidden = false;
+    $('#heat-label').textContent = state.heatmap.name;
+  } else {
+    el.hidden = true;
+  }
+}
+
+$('#heat-off').addEventListener('click', () => {
+  state.heatmap = null;
+  updateHeatLegend();
+  drawMap();
+});
+
+async function renderMarketsPanel() {
+  state.selectedPlanet = null;
+  const scan = await api(`/market-scan/${state.marketSel}`);
+  const ship = selectedShip();
+  const origin = ship?.planet_id != null ? state.planetIndex.get(ship.planet_id)?.system : null;
+  const distOf = (m) => origin ? Math.round(Math.hypot(m.x - origin.x, m.y - origin.y)) : null;
+
+  const resources = state.universe.resources;
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title">Marchés — ${scan.name}</h2>
+    <p class="panel-sub">Comparateur d'arbitrage sur vos marchés connus
+      (prix de base ${fmtPrice.format(scan.basePrice)} cr).</p>
+    <div style="margin-bottom:8px">
+      <select id="market-res">
+        ${['raw', 'intermediate', 'finished'].map((t) => `<optgroup label="${TIER_LABELS[t]}">${
+          resources.filter((r) => r.tier === t)
+            .map((r) => `<option value="${r.id}" ${r.id === state.marketSel ? 'selected' : ''}>${r.name}</option>`).join('')
+        }</optgroup>`).join('')}
+      </select>
+      <button class="action-btn" id="market-heat">${
+        state.heatmap?.resourceId === scan.resourceId ? 'Masquer la carte' : 'Voir sur la carte'}</button>
+    </div>
+  `;
+
+  if (scan.markets.length === 0) {
+    html += `<p class="hint">Aucun marché connu pour cette ressource. Voyagez,
+      ou achetez des relevés, pour peupler votre carte.</p>`;
+  } else {
+    const sorted = [...scan.markets].sort((a, b) => a.price - b.price);
+    const cheapest = sorted[0].price;
+    const dearest = sorted[sorted.length - 1].price;
+    html += `<table>
+      <tr><th>Marché</th><th>Prix</th><th>Stock</th><th>Vu</th><th>Dist.</th></tr>`;
+    for (const m of sorted) {
+      const cls = m.price === cheapest ? 'buy' : m.price === dearest ? 'sell' : '';
+      html += `<tr class="market-row ${cls}">
+        <td><span class="goto-link" data-planet="${m.planetId}" data-system="${m.systemId}">${m.planetName}</span></td>
+        <td title="base ${fmtPrice.format(scan.basePrice)}">${fmtPrice.format(m.price)}</td>
+        <td>${m.stock === null ? '?' : fmtQty(m.stock)}</td>
+        <td>${m.ageTicks === 0 ? 'live' : `−${m.ageTicks}t`}</td>
+        <td>${distOf(m) === null ? '—' : fmtQty(distOf(m)) + 'u'}</td>
+      </tr>`;
+    }
+    html += `</table>
+      <p class="panel-sub" style="margin-top:8px">Marge brute repérée :
+        <span class="price-low">${fmtPrice.format(cheapest)}</span> →
+        <span class="price-high">${fmtPrice.format(dearest)}</span>
+        (${fmtPrice.format(dearest - cheapest)} cr/u, hors glissement et transport)</p>`;
+  }
+
+  panel.innerHTML = html;
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+  $('#market-res').addEventListener('change', (e) => {
+    state.marketSel = e.target.value;
+    renderMarketsPanel();
+  });
+  $('#market-heat').addEventListener('click', () => {
+    state.heatmap = state.heatmap?.resourceId === scan.resourceId ? null : buildHeatmap(scan);
+    updateHeatLegend();
+    drawMap();
+    renderMarketsPanel();
+  });
+  for (const link of panel.querySelectorAll('.goto-link')) {
+    link.addEventListener('click', () => {
+      const sys = state.universe.systems.find((s) => s.id === Number(link.dataset.system));
+      if (sys) { selectSystem(sys); selectPlanet(Number(link.dataset.planet)); }
+    });
+  }
+}
+
+$('#btn-markets').addEventListener('click', renderMarketsPanel);
+
 // ── Panneau : technologies ───────────────────────────────────────
 
 async function renderTechPanel() {
@@ -1354,6 +1486,35 @@ async function pollEvents() {
   }
 }
 
+// Alertes : ce qui réclame l'attention. Cliquer une alerte localisée
+// ouvre la planète concernée.
+async function refreshAlerts() {
+  const alerts = await api('/alerts');
+  const bar = $('#alerts-bar');
+  bar.innerHTML = '';
+  bar.hidden = alerts.length === 0;
+  for (const a of alerts) {
+    const el = document.createElement('span');
+    el.className = `alert ${a.level}`;
+    el.textContent = (a.level === 'crit' ? '⚠ ' : '') + a.message;
+    if (a.planetId) {
+      el.dataset.planet = a.planetId;
+      el.addEventListener('click', () => {
+        const entry = state.planetIndex.get(a.planetId);
+        if (entry) { selectSystem(entry.system); selectPlanet(a.planetId); }
+      });
+    }
+    bar.appendChild(el);
+  }
+}
+
+// Rafraîchit la carte thermique active avec les dernières données connues.
+async function refreshHeatmap() {
+  if (!state.heatmap) return;
+  const scan = await api(`/market-scan/${state.heatmap.resourceId}`);
+  state.heatmap = buildHeatmap(scan);
+}
+
 async function poll() {
   try {
     const s = await api('/state');
@@ -1364,7 +1525,7 @@ async function poll() {
     state.fronts = new Set(s.wars.flatMap((w) => w.fronts));
     renderHudState(s);
     if (tickChanged) {
-      await Promise.all([refreshPlayerAndKnowledge(), pollEvents()]);
+      await Promise.all([refreshPlayerAndKnowledge(), pollEvents(), refreshAlerts(), refreshHeatmap()]);
       renderHudPlayer();
       drawMap();
       await refreshPlanetPanel();
@@ -1411,6 +1572,7 @@ async function init() {
     await selectPlanet(entry.planet.id);
   }
 
+  await refreshAlerts();
   log('Bienvenue à bord. Votre concession produit — chargez, voyagez, vendez plus cher.');
   setInterval(poll, POLL_MS);
 }
