@@ -16,11 +16,30 @@
     </div>
   </header>
 
+  <div id="hud">
+    <span class="hud-item">CRÉDITS <strong id="hud-credits">—</strong></span>
+    <span class="hud-item">PRESTIGE <strong id="hud-prestige">—</strong></span>
+    <span class="hud-item">SOUTE <strong id="hud-cargo">—</strong></span>
+    <span class="hud-item">CARBURANT <strong id="hud-fuel">—</strong></span>
+    <span class="hud-item" id="hud-location">—</span>
+    <span id="time-controls">
+      <button class="time-btn" data-speed="0" title="Pause">⏸</button>
+      <button class="time-btn" data-speed="1" title="Vitesse normale">×1</button>
+      <button class="time-btn" data-speed="2" title="Vitesse double">×2</button>
+      <button class="time-btn" data-speed="4" title="Vitesse quadruple">×4</button>
+      <button id="btn-skip" class="time-btn" hidden title="Avancer jusqu'à l'arrivée">→ arrivée</button>
+    </span>
+  </div>
+
   <main>
     <aside id="panel">
       <div id="panel-content">
         <p class="hint">Cliquez sur un système de la carte pour voir ses planètes,
-        puis sur une planète pour suivre ses stocks et ses prix en direct.</p>
+        puis sur une planète pour consulter son marché, y voyager et commercer.</p>
+      </div>
+      <div id="journal">
+        <div class="section-label">Journal</div>
+        <ul id="journal-list"></ul>
       </div>
     </aside>
 

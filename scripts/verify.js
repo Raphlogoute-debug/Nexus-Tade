@@ -1,17 +1,22 @@
-// Script de vérification de la Phase 1 — sans Express ni UI :
-//   1. génère un univers en mémoire et contrôle ses invariants,
-//   2. vérifie la reproductibilité (même seed → même univers),
-//   3. fait tourner 10 ticks et montre que les prix suivent l'offre/demande
-//      (surplus → baisse, pénurie → hausse), cas concrets à l'appui.
+// Script de vérification — sans Express ni UI.
+// Phase 1 : génération, reproductibilité, prix offre/demande sur 10 ticks.
+// Phase 2 : scénario joueur complet : concession → chargement → vente
+//   (impact prix + prestige), glissement sur gros ordre, contrôle des
+//   tiers, voyage avec carburant, connaissance des marchés qui se périme.
 //
 // Usage : npm run verify   (code de sortie ≠ 0 si un contrôle échoue)
 
-import { createDb } from '../server/db.js';
+import { CONFIG } from '../server/config.js';
+import { createDb, getCurrentTick } from '../server/db.js';
 import { generateUniverse } from '../server/universe/generator.js';
-import { runTick } from '../server/economy/engine.js';
+import { runTick } from '../server/simulation.js';
 import { RECIPES } from '../data/recipes.js';
 import { RESOURCES } from '../data/resources.js';
 import { BIOMES } from '../data/biomes.js';
+import { initPlayer, getPlayer, getShip, getCargo, tierOf } from '../server/player/state.js';
+import { previewTrade, executeTrade } from '../server/player/trade.js';
+import { previewTravel, startTravel } from '../server/player/travel.js';
+import { getConcession, collectConcession } from '../server/player/concession.js';
 
 const SEED = 424242;
 const TICKS = 10;
@@ -55,9 +60,6 @@ check(fingerprint(db) === fingerprint(db2), 'même seed → univers identique (r
 db2.close();
 
 // ── 3. Choix de deux cas démonstratifs ───────────────────────────
-// Demande totale par tick = consommation civile + entrées industrielles,
-// comme dans le moteur. On choisit le plus gros surplus net et la plus
-// grosse pénurie nette, en évitant les prix déjà collés aux bornes.
 
 const industriesByPlanet = new Map();
 for (const row of db.prepare('SELECT planet_id, recipe_id, rate FROM planet_industries').all()) {
@@ -79,7 +81,7 @@ for (const r of rows) {
   r.priceRatio = r.price / RESOURCES[r.resource_id].basePrice;
 }
 
-const headroom = (r) => r.priceRatio > 0.45 && r.priceRatio < 2.5; // pas déjà aux bornes
+const headroom = (r) => r.priceRatio > 0.45 && r.priceRatio < 2.5;
 const surplusCase = rows.filter((r) => r.netFlow > 1 && headroom(r))
   .sort((a, b) => b.netFlow - a.netFlow)[0];
 const shortageCase = rows.filter((r) => r.netFlow < -1 && headroom(r))
@@ -89,6 +91,10 @@ check(Boolean(surplusCase), 'au moins un marché en surplus net trouvé');
 check(Boolean(shortageCase), 'au moins un marché en pénurie nette trouvée');
 
 // ── 4. Simulation de 10 ticks ────────────────────────────────────
+
+// Le joueur est initialisé AVANT la simulation : sa concession produit
+// pendant que l'économie tourne.
+initPlayer(db);
 
 const initialPrices = new Map(rows.map((r) => [`${r.planet_id}:${r.resource_id}`, r.price]));
 const tracked = [
@@ -150,6 +156,100 @@ const historyDepth = db.prepare(
 check(historyDepth === TICKS + 1,
   `historique de prix : ${historyDepth} points conservés (tick 0 à ${TICKS})`);
 
+// ══ Phase 2 : scénario joueur ════════════════════════════════════
+
+console.log('\n■ Phase 2 — scénario joueur\n');
+
+const ship = getShip(db);
+const home = db.prepare('SELECT * FROM planets WHERE id = ?').get(ship.planet_id);
+const concession = getConcession(db);
+
+check(tierOf(home.population) === 1,
+  `départ sur ${home.name} (${BIOMES[home.biome].label.toLowerCase()}, ${Math.round(home.population)} M hab.) — tier 1, ouvert à tous`);
+check(concession.planet_id === home.id && concession.stockpile > 0,
+  `concession de ${RESOURCES[concession.resource_id].name} : entrepôt à ${concession.stockpile.toFixed(0)} après ${TICKS} ticks (+${concession.rate}/tick)`);
+
+// Chargement puis vente locale : crédits, prestige et impact prix.
+const before = {
+  credits: getPlayer(db).credits,
+  prestige: getPlayer(db).prestige,
+  market: readOne.get(home.id, concession.resource_id),
+};
+const collected = collectConcession(db);
+check(collected.ok && collected.moved > 0, `${collected.moved} unités chargées en soute`);
+
+const sale = executeTrade(db, { side: 'sell', resourceId: concession.resource_id, quantity: collected.moved });
+const after = {
+  credits: getPlayer(db).credits,
+  prestige: getPlayer(db).prestige,
+  market: readOne.get(home.id, concession.resource_id),
+};
+check(sale.ok && after.credits > before.credits,
+  `vente : +${sale.total} cr à ${sale.unitPrice}/u (crédits ${before.credits} → ${after.credits})`);
+check(after.prestige > before.prestige,
+  `prestige : ${before.prestige} → ${after.prestige} (profit + nouveau partenaire)`);
+check(after.market.stock > before.market.stock && after.market.price < before.market.price,
+  `impact marché : stock ${before.market.stock.toFixed(0)} → ${after.market.stock.toFixed(0)}, prix ${before.market.price} → ${after.market.price} (la vente fait baisser)`);
+
+// Glissement : un gros ordre coûte plus cher l'unité qu'un petit.
+const liquid = db.prepare(
+  `SELECT resource_id, stock FROM planet_resources
+   WHERE planet_id = ? AND stock > 100 ORDER BY stock DESC LIMIT 1`
+).get(home.id);
+const small = previewTrade(db, { side: 'buy', resourceId: liquid.resource_id, quantity: 1 });
+const big = previewTrade(db, { side: 'buy', resourceId: liquid.resource_id, quantity: Math.floor(liquid.stock * 0.5) });
+check(big.unitPrice > small.unitPrice,
+  `glissement : acheter 50 % du stock coûte ${big.unitPrice}/u contre ${small.unitPrice}/u à l'unité`);
+
+// Contrôle des tiers : un monde majeur refuse un marchand sans réputation.
+const bigWorld = db.prepare('SELECT id, name, population FROM planets WHERE population >= 500 LIMIT 1').get();
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(bigWorld.id, ship.id); // téléport de test
+const refused = executeTrade(db, { side: 'buy', resourceId: 'water', quantity: 1 });
+check(!refused.ok && refused.refusedTier === 3,
+  `tier 3 (${bigWorld.name}, ${Math.round(bigWorld.population)} M hab.) refusé sans prestige ni licence`);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(home.id, ship.id);
+
+// Voyage : vers le système le plus proche HORS du rayon de rumeurs —
+// l'arrivée doit donc étendre la connaissance du joueur.
+const dest = db.prepare(
+  `SELECT p.id, p.name, sd.distance FROM planets p
+   JOIN system_distances sd ON (sd.system_a = ? AND sd.system_b = p.system_id)
+                            OR (sd.system_b = ? AND sd.system_a = p.system_id)
+   WHERE sd.distance > ?
+   ORDER BY sd.distance LIMIT 1`
+).get(home.system_id, home.system_id, CONFIG.PLAYER.GOSSIP_RADIUS);
+
+const knownBefore = db.prepare('SELECT COUNT(DISTINCT planet_id) AS n FROM known_prices').get().n;
+const fuelBefore = getShip(db).fuel;
+const trip = startTravel(db, dest.id, getCurrentTick(db));
+check(trip.ok && getShip(db).planet_id === null && getShip(db).fuel === fuelBefore - trip.fuelCost,
+  `départ vers ${dest.name} (${trip.distance.toFixed(0)} u) : ${trip.ticks} tick(s), −${trip.fuelCost} carburant`);
+
+while (getShip(db).planet_id === null) runTick(db);
+const knownAfter = db.prepare('SELECT COUNT(DISTINCT planet_id) AS n FROM known_prices').get().n;
+check(getShip(db).planet_id === dest.id, `arrivé à ${dest.name} au tick ${getCurrentTick(db)}`);
+check(knownAfter > knownBefore,
+  `connaissance étendue : ${knownBefore} → ${knownAfter} marchés connus (relevé local + rumeurs de quai)`);
+
+// Connaissance périssable : loin des yeux, les prix divergent.
+for (let i = 0; i < 8; i++) runTick(db);
+const stale = db.prepare(
+  `SELECT kp.planet_id, kp.resource_id, kp.price AS known, pr.price AS live
+   FROM known_prices kp
+   JOIN planet_resources pr ON pr.planet_id = kp.planet_id AND pr.resource_id = kp.resource_id
+   WHERE kp.planet_id != ? AND ABS(kp.price - pr.price) > 0.05 LIMIT 1`
+).get(getShip(db).planet_id);
+check(Boolean(stale),
+  `données périssables : prix connu ${stale?.known} ≠ prix réel ${stale?.live} sur un marché non revisité`);
+
+const secondHand = db.prepare(
+  'SELECT COUNT(*) AS n FROM known_prices WHERE stock IS NULL'
+).get().n;
+check(secondHand > 0,
+  `${secondHand} relevés de seconde main (prix sans stocks) — l'info complète exige d'être sur place`);
+
 db.close();
-console.log(failures ? `\n✗ ${failures} contrôle(s) en échec\n` : '\n✓ Phase 1 vérifiée : génération, simulation et prix offre/demande OK\n');
+console.log(failures
+  ? `\n✗ ${failures} contrôle(s) en échec\n`
+  : '\n✓ Phases 1 et 2 vérifiées : économie, commerce, voyage, tiers et connaissance OK\n');
 process.exit(failures ? 1 : 0);

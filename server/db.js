@@ -65,6 +65,67 @@ CREATE TABLE IF NOT EXISTS price_history (
   PRIMARY KEY (planet_id, resource_id, tick)
 );
 CREATE INDEX IF NOT EXISTS idx_price_history_tick ON price_history(tick);
+
+-- ── Phase 2 : le joueur ──────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS player (
+  id           INTEGER PRIMARY KEY CHECK (id = 1), -- singleton
+  credits      REAL NOT NULL,
+  prestige     REAL NOT NULL,
+  licence_tier INTEGER NOT NULL DEFAULT 1 -- plus haut tier acheté en licence
+);
+
+-- Un seul vaisseau en Phase 2, mais la table est prête pour une flotte.
+-- À quai : planet_id renseigné. En transit : planet_id NULL et les
+-- colonnes origin/dest/departure/arrival décrivent le voyage.
+CREATE TABLE IF NOT EXISTS ships (
+  id               INTEGER PRIMARY KEY,
+  name             TEXT NOT NULL,
+  planet_id        INTEGER,
+  origin_system_id INTEGER,
+  dest_system_id   INTEGER,
+  dest_planet_id   INTEGER,
+  departure_tick   INTEGER,
+  arrival_tick     INTEGER,
+  cargo_capacity   REAL NOT NULL,
+  fuel             REAL NOT NULL,
+  fuel_capacity    REAL NOT NULL,
+  speed            REAL NOT NULL
+);
+
+-- avg_cost : coût d'achat moyen pondéré, sert à calculer le profit
+-- réalisé à la revente (→ prestige).
+CREATE TABLE IF NOT EXISTS ship_cargo (
+  ship_id     INTEGER NOT NULL,
+  resource_id TEXT NOT NULL,
+  quantity    REAL NOT NULL,
+  avg_cost    REAL NOT NULL,
+  PRIMARY KEY (ship_id, resource_id)
+);
+
+CREATE TABLE IF NOT EXISTS concession (
+  id          INTEGER PRIMARY KEY CHECK (id = 1), -- singleton
+  planet_id   INTEGER NOT NULL,
+  resource_id TEXT NOT NULL,
+  level       INTEGER NOT NULL,
+  stockpile   REAL NOT NULL
+);
+
+-- Ce que le joueur SAIT des marchés : derniers prix vus, avec leur date.
+-- stock NULL = donnée de seconde main (rumeur de quai, relevé acheté).
+CREATE TABLE IF NOT EXISTS known_prices (
+  planet_id   INTEGER NOT NULL,
+  resource_id TEXT NOT NULL,
+  price       REAL NOT NULL,
+  stock       REAL,
+  seen_tick   INTEGER NOT NULL,
+  PRIMARY KEY (planet_id, resource_id)
+);
+
+CREATE TABLE IF NOT EXISTS trade_partners (
+  planet_id        INTEGER PRIMARY KEY,
+  first_trade_tick INTEGER NOT NULL
+);
 `;
 
 export function createDb(path) {
@@ -96,7 +157,8 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
-      'price_history', 'planet_industries', 'planet_resources',
+      'trade_partners', 'known_prices', 'concession', 'ship_cargo', 'ships',
+      'player', 'price_history', 'planet_industries', 'planet_resources',
       'system_distances', 'planets', 'systems', 'meta',
     ]) {
       db.prepare(`DELETE FROM ${table}`).run();

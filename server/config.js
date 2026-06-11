@@ -64,4 +64,48 @@ export const CONFIG = {
     // (évite les sauts brutaux, donne des courbes lisibles).
     SMOOTHING: 0.25,
   },
+
+  PLAYER: {
+    START_CREDITS: 2000,
+
+    SHIP: {
+      NAME: 'Le Colporteur',
+      CARGO: 250,        // capacité de soute (unités)
+      FUEL_CAP: 400,     // réservoir
+      SPEED: 150,        // unités de carte par tick
+      DIST_PER_FUEL: 25, // 1 carburant consommé tous les 25 unités de distance
+    },
+
+    // Niveaux de concession (index = niveau - 1). rate = extraction/tick,
+    // cap = taille de l'entrepôt, cost = prix du passage À ce niveau.
+    CONCESSION_LEVELS: [
+      { rate: 25, cap: 1500, cost: 0 },
+      { rate: 60, cap: 4000, cost: 8000 },
+      { rate: 150, cap: 10000, cost: 30000 },
+    ],
+
+    // Prestige : 1 point par tranche de profit réalisé, bonus par nouveau
+    // partenaire commercial (première transaction avec une planète).
+    PRESTIGE: {
+      PROFIT_PER_POINT: 100,
+      NEW_PARTNER: 25,
+    },
+
+    // Tiers de marché : seuils de population (en M hab.), prestige requis
+    // pour y commercer, et prix de la licence (raccourci payant).
+    // T1 (en dessous de TIERS[2].minPop) est ouvert à tous.
+    TIERS: {
+      2: { minPop: 50, prestige: 200, licenceCost: 5000 },
+      3: { minPop: 500, prestige: 1000, licenceCost: 25000 },
+    },
+
+    // Connaissance des marchés : à quai, les locaux donnent des relevés
+    // (prix uniquement) des systèmes voisins, vieux de quelques ticks.
+    GOSSIP_RADIUS: 250,
+    GOSSIP_MAX_AGE: 15, // ancienneté max des rumeurs (ticks)
+    INTEL: { BASE_COST: 50, COST_PER_DIST: 0.1, AGE: 3 },
+
+    // Garde-fou du bouton « avancer jusqu'à l'arrivée ».
+    SKIP_MAX_TICKS: 200,
+  },
 };

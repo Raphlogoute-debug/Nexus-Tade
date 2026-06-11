@@ -37,6 +37,16 @@ export function nextPrice({ basePrice, stock, target, previousPrice }) {
   return round2(previousPrice + (eq - previousPrice) * P.SMOOTHING);
 }
 
+// Prix unitaire effectif d'un ordre joueur, glissement inclus : la rareté
+// est évaluée au stock médian pendant l'exécution. Plus l'ordre est gros
+// par rapport au marché, plus le prix se déplace contre vous — c'est ce
+// qui rend les petits marchés (avant-postes) peu profonds.
+export function tradeUnitPrice({ basePrice, currentPrice, stock, quantity, side }) {
+  const midStock = side === 'buy' ? stock - quantity / 2 : stock + quantity / 2;
+  const impact = Math.pow(stock / Math.max(midStock, 1), CONFIG.PRICING.ELASTICITY);
+  return round2(clamp(currentPrice * impact, basePrice * P.MIN_MULT, basePrice * P.MAX_MULT));
+}
+
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }

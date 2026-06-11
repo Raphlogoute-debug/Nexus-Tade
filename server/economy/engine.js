@@ -20,6 +20,17 @@ import { RECIPES } from '../../data/recipes.js';
 import { targetStock, nextPrice } from './pricing.js';
 import { getCurrentTick, setMeta } from '../db.js';
 
+// Demande totale par tick d'une ressource sur une planète : consommation
+// civile + besoins industriels à plein régime. Partagée entre le tick
+// économique et le marché joueur (les deux doivent voir le même stock cible).
+export function resourceDemand(resourceId, civilConsumption, industries) {
+  let demand = civilConsumption;
+  for (const { recipe_id, rate } of industries) {
+    demand += (RECIPES[recipe_id].inputs[resourceId] ?? 0) * rate;
+  }
+  return demand;
+}
+
 export function runTick(db) {
   const startedAt = Date.now();
   const tick = getCurrentTick(db) + 1;
@@ -58,10 +69,7 @@ export function runTick(db) {
       for (const row of planet.resources.values()) {
         // Demande totale par tick = civile + besoins industriels à plein
         // régime ; elle fixe le stock cible du modèle de prix.
-        let demand = row.consumption;
-        for (const { recipe_id, rate } of planet.industries) {
-          demand += (RECIPES[recipe_id].inputs[row.resource_id] ?? 0) * rate;
-        }
+        const demand = resourceDemand(row.resource_id, row.consumption, planet.industries);
         const price = nextPrice({
           basePrice: RESOURCES[row.resource_id].basePrice,
           stock: row.stock,

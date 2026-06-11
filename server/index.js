@@ -1,13 +1,15 @@
-// Point d'entrée : Express (API + fichiers statiques) et boucle de tick.
+// Point d'entrée : Express (API + fichiers statiques) et horloge de
+// simulation contrôlable (pause / ×1 / ×2 / ×4, saut jusqu'à l'arrivée).
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CONFIG } from './config.js';
-import { createDb, getMeta } from './db.js';
+import { createDb, getMeta, setMeta, getCurrentTick } from './db.js';
 import { generateUniverse } from './universe/generator.js';
 import { randomSeed } from './universe/rng.js';
-import { runTick } from './economy/engine.js';
+import { runTick } from './simulation.js';
+import { initPlayer, getPlayer, getShip } from './player/state.js';
 import { createApiRouter } from './routes/api.js';
 
 const rootDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,22 +23,74 @@ if (getMeta(db, 'seed') === null) {
   console.log(`✦ Univers chargé — seed ${getMeta(db, 'seed')}`);
 }
 
+// Nouvelle partie si aucun joueur (couvre aussi les DB de la Phase 1).
+if (!getPlayer(db)) {
+  const { homePlanetId, concessionResource } = initPlayer(db);
+  console.log(`✦ Nouvelle partie — concession de ${concessionResource} sur la planète #${homePlanetId}`);
+}
+
+// ── Horloge ──────────────────────────────────────────────────────
+// La vitesse multiplie la fréquence des ticks (0 = pause). Le saut
+// exécute les ticks de façon synchrone jusqu'à l'arrivée du vaisseau.
+
+const SPEEDS = [0, 1, 2, 4];
+
+function createClock() {
+  let speed = Number(getMeta(db, 'time_speed') ?? 1);
+  let timer = null;
+
+  function tickOnce() {
+    const r = runTick(db);
+    if (r.tick % 10 === 0 || r.events.length > 0) {
+      console.log(`  tick ${r.tick} — ${r.planets} planètes, ${r.durationMs} ms`
+        + (r.events.length ? ` — ${r.events.length} événement(s)` : ''));
+    }
+  }
+
+  function reschedule() {
+    if (timer) clearInterval(timer);
+    timer = speed > 0 ? setInterval(tickOnce, CONFIG.TICK_MS / speed) : null;
+  }
+
+  return {
+    speeds: SPEEDS,
+    getSpeed: () => speed,
+    setSpeed(s) {
+      speed = s;
+      setMeta(db, 'time_speed', s);
+      reschedule();
+    },
+    // Avance jusqu'au tick cible (borné). Retourne le nombre de ticks joués.
+    skipUntil(targetTick) {
+      let played = 0;
+      while (getCurrentTick(db) < targetTick && played < CONFIG.PLAYER.SKIP_MAX_TICKS) {
+        runTick(db);
+        played++;
+      }
+      return played;
+    },
+    start: reschedule,
+    stop: () => timer && clearInterval(timer),
+  };
+}
+
+const clock = createClock();
+
 const app = express();
 app.use(express.json());
-app.use('/api', createApiRouter(db));
+app.use('/api', createApiRouter(db, clock));
 app.use(express.static(path.join(rootDir, 'public')));
 
 app.listen(CONFIG.PORT, () => {
-  console.log(`✦ Nexus Trade sur http://localhost:${CONFIG.PORT} (tick toutes les ${CONFIG.TICK_MS} ms)`);
+  const ship = getShip(db);
+  console.log(`✦ Nexus Trade sur http://localhost:${CONFIG.PORT}`
+    + ` (tick ${CONFIG.TICK_MS} ms ×${clock.getSpeed()}, vaisseau sur planète #${ship.planet_id ?? 'transit'})`);
 });
 
-const ticker = setInterval(() => {
-  const { tick, planets, durationMs } = runTick(db);
-  console.log(`  tick ${tick} — ${planets} planètes simulées en ${durationMs} ms`);
-}, CONFIG.TICK_MS);
+clock.start();
 
 process.on('SIGINT', () => {
-  clearInterval(ticker);
+  clock.stop();
   db.close();
   process.exit(0);
 });
