@@ -36,17 +36,39 @@ export function initTraders(db) {
   return { traders: count };
 }
 
+// Les voisinages stellaires sont statiques : la liste des planètes à
+// portée d'un système (avec leur distance) se calcule une fois et se
+// garde en mémoire. Le scan d'un marchand devient une simple lecture de
+// planet_resources sur une liste d'ids.
+function neighborsOf(db, systemId) {
+  if (!db.__traderNeighbors) db.__traderNeighbors = new Map();
+  let cached = db.__traderNeighbors.get(systemId);
+  if (!cached) {
+    cached = db.prepare(
+      `SELECT p.id AS planet_id,
+              SQRT((s2.x - me.x) * (s2.x - me.x) + (s2.y - me.y) * (s2.y - me.y)) AS dist
+       FROM planets p
+       JOIN systems s2 ON s2.id = p.system_id
+       JOIN systems me ON me.id = ?
+       WHERE (s2.x - me.x) * (s2.x - me.x) + (s2.y - me.y) * (s2.y - me.y) <= ?`
+    ).all(systemId, T.SCAN_RADIUS ** 2);
+    db.__traderNeighbors.set(systemId, cached);
+  }
+  return cached;
+}
+
 // Marchés (toutes ressources) des planètes à portée d'un système donné.
 function marketsInRange(db, systemId) {
-  return db.prepare(
-    `SELECT pr.planet_id, pr.resource_id, pr.stock, pr.price,
-            p.system_id, s2.x, s2.y, me.x AS mx, me.y AS my
-     FROM planet_resources pr
-     JOIN planets p ON p.id = pr.planet_id
-     JOIN systems s2 ON s2.id = p.system_id
-     JOIN systems me ON me.id = ?
-     WHERE (s2.x - me.x) * (s2.x - me.x) + (s2.y - me.y) * (s2.y - me.y) <= ?`
-  ).all(systemId, T.SCAN_RADIUS ** 2);
+  const neighbors = neighborsOf(db, systemId);
+  const distOf = new Map(neighbors.map((n) => [n.planet_id, n.dist]));
+  // Les ids viennent de notre propre base : inlining sans risque, et la
+  // requête (une par système) reste en cache de préparation.
+  const rows = db.prepare(
+    `SELECT planet_id, resource_id, stock, price FROM planet_resources
+     WHERE planet_id IN (${neighbors.map((n) => n.planet_id).join(',')})`
+  ).all();
+  for (const r of rows) r.dist = distOf.get(r.planet_id);
+  return rows;
 }
 
 export function tickTraders(db, tick) {
@@ -68,10 +90,20 @@ export function tickTraders(db, tick) {
     'UPDATE traders SET credits = ?, cargo_resource = ?, cargo_qty = ?, cargo_cost = ?, trades_done = trades_done + 1 WHERE id = ?'
   );
 
+  // Le scan régional est ce qui coûte : il est partagé entre marchands du
+  // même système, et chaque marchand ne délibère qu'un tick sur deux
+  // (décalés par id — personne ne remarque qu'un capitaine réfléchit 10 s).
+  const scanCache = new Map();
+  const scanFor = (systemId) => {
+    if (!scanCache.has(systemId)) scanCache.set(systemId, marketsInRange(db, systemId));
+    return scanCache.get(systemId);
+  };
+
   for (const trader of docked) {
+    if ((tick + trader.id) % 2 !== 0) continue;
     const systemId = systemOf.get(trader.planet_id).system_id;
-    const markets = marketsInRange(db, systemId);
-    const dist = (m) => Math.hypot(m.x - m.mx, m.y - m.my);
+    const markets = scanFor(systemId);
+    const dist = (m) => m.dist;
 
     if (trader.cargo_qty > 0) {
       // Vendre : au meilleur marché atteignable, ici si c'est ici.

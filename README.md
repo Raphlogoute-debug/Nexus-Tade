@@ -27,6 +27,7 @@ même partie.
 ```bash
 npm run verify     # vérification bout en bout sans serveur : économie,
                    # commerce, voyage, tiers, connaissance (10+ ticks simulés)
+npm run bench      # banc d'essai : coût d'un tick sur disque, partie chargée
 ```
 
 Variables d'environnement : `PORT` (défaut 3000), `TICK_MS` (défaut 5000),
@@ -273,6 +274,13 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
   formule.
 - **L'information est une ressource** : les prix lointains sont vieux,
   incomplets ou payants.
+- **Performances** (`npm run bench`, sur disque, partie chargée) : ~106 ms
+  par tick en médiane, max 225 ms — 2 % du budget de 5 s, ~9 ticks/s en
+  accéléré. Recettes : une seule transaction par tick, WAL +
+  synchronous NORMAL, cache global de requêtes préparées, écritures
+  limitées aux marchés qui bougent, historique échantillonné (1/2 ticks,
+  prix vivants seulement), voisinages stellaires précalculés et scans
+  partagés pour les PNJ et la flotte.
 
 ## Reste à faire (Phase 8+) — cap sur l'économie et le joueur
 
@@ -281,5 +289,6 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
 - **Encore des chaînes** : ressources exotiques rares par biome, recettes
   alternatives (rendements différents selon la filière)
 - Contrebande (franchir blocus et listes noires), prêts de guerre
-- État de simulation en mémoire + sauvegarde différée ; SSE à la place du
-  polling ; événements économiques (repoussés à la demande du joueur)
+- SSE à la place du polling ; état de simulation en mémoire si un jour
+  les ~100 ms/tick ne suffisent plus ; événements économiques (repoussés
+  à la demande du joueur)

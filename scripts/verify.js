@@ -165,11 +165,15 @@ const total = up + down + flat;
 console.log(`  ${total} marchés (planète × ressource) : ${up} prix en hausse, ${down} en baisse, ${flat} stables`);
 check(up > 0 && down > 0, 'les prix bougent dans les deux sens selon l\'offre/demande');
 
+// Historique échantillonné : 1 point sur HISTORY_EVERY ticks (+ le tick 0
+// de génération), uniquement quand le prix bouge — il bouge à chaque tick
+// sur ce marché en surplus.
 const historyDepth = db.prepare(
   'SELECT COUNT(*) AS n FROM price_history WHERE planet_id = ? AND resource_id = ?'
 ).get(surplusCase.planet_id, surplusCase.resource_id).n;
-check(historyDepth === TICKS + 1,
-  `historique de prix : ${historyDepth} points conservés (tick 0 à ${TICKS})`);
+const expectedHistory = 1 + Math.floor(TICKS / CONFIG.HISTORY_EVERY);
+check(historyDepth === expectedHistory,
+  `historique de prix : ${historyDepth} points conservés (échantillonnage 1/${CONFIG.HISTORY_EVERY} ticks)`);
 
 // ══ Phase 2 : scénario joueur ════════════════════════════════════
 

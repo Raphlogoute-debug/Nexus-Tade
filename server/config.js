@@ -11,8 +11,11 @@ export const CONFIG = {
   // Chemin du fichier SQLite. Surchargé par NEXUS_DB_PATH.
   DB_PATH: process.env.NEXUS_DB_PATH || 'nexus-trade.db',
 
-  // Nombre de ticks d'historique de prix conservés par planète/ressource.
+  // Historique de prix : profondeur conservée (ticks) et cadence
+  // d'échantillonnage (1 point tous les N ticks — avec le lissage des
+  // prix, un point sur deux suffit aux graphes et divise les écritures).
   HISTORY_TICKS: 120,
+  HISTORY_EVERY: 2,
 
   UNIVERSE: {
     MIN_SYSTEMS: 60,

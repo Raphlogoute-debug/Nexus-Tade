@@ -27,6 +27,9 @@ export function marketContext(db, planetId, resourceId) {
 // l'appelant. Pré-conditions (stock suffisant côté achat) déjà vérifiées.
 export function applyMarketTrade(db, planetId, resourceId, quantity, side, market = null) {
   const m = market ?? marketContext(db, planetId, resourceId);
+  // Garde-fou : les acheteurs sur données mises en cache (PNJ, autos) ne
+  // peuvent pas vider un stock en dessous de zéro.
+  if (side === 'buy') quantity = Math.min(quantity, m.stock);
   const unitPrice = tradeUnitPrice({
     basePrice: m.basePrice, currentPrice: m.price,
     stock: m.stock, quantity, side,

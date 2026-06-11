@@ -47,6 +47,7 @@ export function runTick(db) {
   // les convois et les marchands, traités hors du tick économique local).
   const planets = new Map();
   for (const row of resourceRows) {
+    row.stock0 = row.stock; // pour ne réécrire que ce qui a bougé
     if (!planets.has(row.planet_id)) {
       planets.set(row.planet_id, { resources: new Map(), industries: [], supply: 1 });
     }
@@ -89,8 +90,16 @@ export function runTick(db) {
           previousPrice: row.price,
         });
 
-        updateResource.run(round2(row.stock), price, row.planet_id, row.resource_id);
-        insertHistory.run(row.planet_id, row.resource_id, tick, price);
+        // Beaucoup de marchés sont dormants (ni production, ni demande,
+        // prix figé à sa borne) : ne réécrire que ce qui a bougé, et
+        // n'historiser que les prix qui vivent.
+        const newStock = round2(row.stock);
+        if (newStock !== row.stock0 || price !== row.price) {
+          updateResource.run(newStock, price, row.planet_id, row.resource_id);
+        }
+        if (tick % CONFIG.HISTORY_EVERY === 0 && price !== row.price) {
+          insertHistory.run(row.planet_id, row.resource_id, tick, price);
+        }
       }
     }
 

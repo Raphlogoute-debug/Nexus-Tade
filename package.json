@@ -6,7 +6,8 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "verify": "node scripts/verify.js"
+    "verify": "node scripts/verify.js",
+    "bench": "node scripts/bench.js"
   },
   "engines": {
     "node": ">=18"

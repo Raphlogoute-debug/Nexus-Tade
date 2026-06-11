@@ -278,7 +278,25 @@ const MIGRATIONS = [
 export function createDb(path) {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
+  // NORMAL + WAL : fsync aux checkpoints seulement. Le pire cas (coupure
+  // de courant) perd quelques ticks de simulation — acceptable pour un
+  // jeu, et plusieurs fois plus rapide en écriture.
+  db.pragma('synchronous = NORMAL');
   db.exec(SCHEMA);
+
+  // Cache global de requêtes préparées : tout le code appelle db.prepare
+  // avec des SQL statiques, souvent à chaque tick voire à chaque ordre.
+  // Préparer une seule fois par SQL évite des milliers de compilations.
+  const rawPrepare = db.prepare.bind(db);
+  const stmtCache = new Map();
+  db.prepare = (sql) => {
+    let stmt = stmtCache.get(sql);
+    if (!stmt) {
+      stmt = rawPrepare(sql);
+      stmtCache.set(sql, stmt);
+    }
+    return stmt;
+  };
   for (const m of MIGRATIONS) {
     const cols = db.pragma(`table_info(${m.table})`).map((c) => c.name);
     if (!cols.includes(m.column)) db.exec(m.ddl);

@@ -25,23 +25,31 @@ import { pruneEvents } from './events.js';
 
 export function runTick(db) {
   const startedAt = Date.now();
-  const result = runEconomyTick(db);
-  const tick = result.tick;
+  let result;
+  let events;
 
-  tickNeeds(db, tick);
-  tickDiplomacy(db, tick);
-  tickWars(db, tick);
-  processShipmentArrivals(db, tick, warContext(db));
-  planShipments(db, tick);
-  tickFleets(db);
-  tickTraders(db, tick);
-  tickContracts(db, tick);
-  tickConcessions(db);
-  tickFleetUpkeep(db);
-  tickAutoShips(db, tick);
-  tickRouteShips(db, tick);
-  const events = processArrivals(db, tick);
-  if (tick % 50 === 0) pruneEvents(db);
+  // Tout le tick dans UNE transaction : un seul commit (donc un seul
+  // passage WAL) au lieu de dizaines — et un tick atomique. Les
+  // transactions internes des sous-systèmes deviennent des savepoints.
+  db.transaction(() => {
+    result = runEconomyTick(db);
+    const tick = result.tick;
+
+    tickNeeds(db, tick);
+    tickDiplomacy(db, tick);
+    tickWars(db, tick);
+    processShipmentArrivals(db, tick, warContext(db));
+    planShipments(db, tick);
+    tickFleets(db);
+    tickTraders(db, tick);
+    tickContracts(db, tick);
+    tickConcessions(db);
+    tickFleetUpkeep(db);
+    tickAutoShips(db, tick);
+    tickRouteShips(db, tick);
+    events = processArrivals(db, tick);
+    if (tick % 50 === 0) pruneEvents(db);
+  })();
 
   return { ...result, events, durationMs: Date.now() - startedAt };
 }
