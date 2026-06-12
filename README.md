@@ -259,9 +259,17 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   couverture : pavillon brûlé, −15 de réputation, et la saisie suit
 
 **UI** (`public/`, vanilla, zéro dépendance)
-- Carte canvas : territoires de faction (halos), capitales (losanges),
-  brouillard de connaissance (opacité par fraîcheur), vaisseau et ligne de
-  route, infobulles
+- Carte vivante, rendue en continu (requestAnimationFrame) : fond étoilé
+  en parallaxe avec nébuleuses, territoires de faction en halos doux
+  (calque pré-rendu), étoiles-sprites lumineuses, noms des systèmes au
+  zoom (capitales toujours), fronts de guerre qui pulsent, trafic animé
+  (convois aux couleurs des royaumes, marchands indépendants) interpolé
+  entre les ticks, flotte orientée avec traînée moteur (orbite à quai),
+  coins ambre sur vos concessions
+- Caméra : molette = zoom (vers le curseur), glisser = déplacer, boutons
+  +/−/galaxie/flotte, bascule trafic
+- Brouillard de connaissance (opacité par fraîcheur), infobulles riches
+  (faction, population, fraîcheur des données)
 - Panneau : marché en direct à quai (commerce au clic, formulaire d'ordre
   avec aperçu), données datées à distance, boutons voyage/licence/relevé,
   bloc concession, panneau faction (flotte, tensions stratégiques,
@@ -276,7 +284,7 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `GET /api/universe` | systèmes, positions, planètes (+ tier) |
 | `GET /api/planet/:id` | fiche publique ; détails économiques si à quai |
 | `GET /api/market/:planetId` | direct si à quai (+ historique), sinon dernières données connues datées |
-| `GET /api/state` | tick, seed, vitesse, compteurs |
+| `GET /api/state` | tick, seed, vitesse, compteurs, progression du tick (interpolation client) |
 | `GET /api/player` | crédits, prestige, tiers, vaisseau, cargo, concession |
 | `GET /api/knowledge` | fraîcheur de la connaissance par système |
 | `GET /api/trade/preview` · `POST /api/trade` | aperçu (glissement) et exécution d'ordre |
@@ -291,6 +299,7 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `GET /api/events?since=id` | fil d'événements du monde (guerres, conquêtes, saisies, flotte) |
 | `GET /api/market-scan/:resourceId` | tous vos marchés connus d'une ressource (arbitrage + heatmap) |
 | `GET /api/alerts` | ce qui réclame votre attention (découvert, guerre, entrepôt saturé…) |
+| `GET /api/traffic` | convois et marchands en transit (anime la carte ; cosmétique, ne fuite aucun prix) |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |
 | `POST /api/concession/collect` · `/deposit` · `/upgrade` | transferts entrepôt↔soute, amélioration |

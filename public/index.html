@@ -42,6 +42,14 @@
       <div id="panel-content">
         <p class="hint">Cliquez sur un système de la carte pour voir ses planètes,
         puis sur une planète pour consulter son marché, y voyager et commercer.</p>
+        <div class="section-label">Légende de la carte</div>
+        <ul class="hint legend">
+          <li><span class="lg star"></span> système (halo = royaume, nom en zoomant)</li>
+          <li><span class="lg ship">▲</span> vos vaisseaux (orbite à quai, traînée en vol)</li>
+          <li><span class="lg convoy"></span> convois de factions et <span class="lg trader"></span> marchands</li>
+          <li><span class="lg capital">◇</span> capitale · <span class="lg front">◌</span> front de guerre (pulse)</li>
+          <li><span class="lg claim">⌐</span> coins ambre : vos concessions</li>
+        </ul>
       </div>
       <div id="journal">
         <div class="section-label">Journal</div>
@@ -58,6 +66,14 @@
         <span class="heat-ends"><span>bon marché</span><span>cher</span></span>
         <button id="heat-off">✕</button>
       </div>
+      <div id="map-controls">
+        <button id="zoom-in" title="Zoomer (molette)">+</button>
+        <button id="zoom-out" title="Dézoomer">−</button>
+        <button id="zoom-fit" title="Voir toute la galaxie">⛶</button>
+        <button id="zoom-ship" title="Centrer sur le vaisseau piloté">◎</button>
+        <button id="traffic-toggle" title="Afficher / masquer le trafic (convois et marchands)">trafic</button>
+      </div>
+      <div id="map-hint">molette : zoom · glisser : déplacer · clic : sélectionner</div>
     </section>
   </main>
 

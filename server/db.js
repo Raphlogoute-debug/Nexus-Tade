@@ -294,6 +294,9 @@ const MIGRATIONS = [
   { table: 'ships', column: 'route_id', ddl: 'ALTER TABLE ships ADD COLUMN route_id INTEGER' },
   { table: 'ships', column: 'route_stop', ddl: 'ALTER TABLE ships ADD COLUMN route_stop INTEGER NOT NULL DEFAULT 0' },
   { table: 'ships', column: 'false_flag', ddl: 'ALTER TABLE ships ADD COLUMN false_flag INTEGER NOT NULL DEFAULT 0' },
+  // Trajets visibles sur la carte : il faut savoir d'où part un marchand.
+  { table: 'traders', column: 'from_planet_id', ddl: 'ALTER TABLE traders ADD COLUMN from_planet_id INTEGER' },
+  { table: 'traders', column: 'departure_tick', ddl: 'ALTER TABLE traders ADD COLUMN departure_tick INTEGER' },
 ];
 
 export function createDb(path) {

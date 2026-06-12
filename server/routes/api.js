@@ -317,8 +317,44 @@ export function createApiRouter(db, clock) {
       tickMs: CONFIG.TICK_MS,
       speed: clock.getSpeed(),
       speeds: clock.speeds,
+      progress: clock.getProgress(),
       wars,
     });
+  });
+
+  // ── GET /api/traffic : tout ce qui vole entre les systèmes ──────
+  // Convois de factions (shipments) et marchands indépendants en transit,
+  // avec coordonnées d'origine/destination — la carte les anime pour
+  // montrer un monde vivant. Purement cosmétique : aucune donnée de
+  // marché ne fuite (observer des vaisseaux est de bonne guerre).
+  router.get('/traffic', (req, res) => {
+    const tick = getCurrentTick(db);
+    const traders = db.prepare(
+      `SELECT t.id, t.departure_tick AS dep, t.arrival_tick AS arr,
+              sf.x AS fx, sf.y AS fy, st.x AS tx, st.y AS ty,
+              sf.id AS fromSystem, st.id AS toSystem
+       FROM traders t
+       JOIN planets pf ON pf.id = t.from_planet_id
+       JOIN systems sf ON sf.id = pf.system_id
+       JOIN planets pt ON pt.id = t.dest_planet_id
+       JOIN systems st ON st.id = pt.system_id
+       WHERE t.planet_id IS NULL AND t.from_planet_id IS NOT NULL AND sf.id != st.id
+       LIMIT 300`
+    ).all();
+    const convoys = db.prepare(
+      `SELECT sh.id, sh.departure_tick AS dep, sh.arrival_tick AS arr, sh.quantity,
+              f.color, sf.x AS fx, sf.y AS fy, st.x AS tx, st.y AS ty,
+              sf.id AS fromSystem, st.id AS toSystem
+       FROM shipments sh
+       LEFT JOIN factions f ON f.id = sh.faction_id
+       JOIN planets pf ON pf.id = sh.from_planet_id
+       JOIN systems sf ON sf.id = pf.system_id
+       JOIN planets pt ON pt.id = sh.to_planet_id
+       JOIN systems st ON st.id = pt.system_id
+       WHERE sh.departure_tick <= ? AND sh.arrival_tick > ? AND sf.id != st.id
+       ORDER BY sh.arrival_tick LIMIT 500`
+    ).all(tick, tick);
+    res.json({ tick, traders, convoys });
   });
 
   // ── GET /api/events?since=ID : fil d'événements du monde ────────

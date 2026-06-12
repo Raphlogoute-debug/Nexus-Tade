@@ -56,9 +56,11 @@ const SPEEDS = [0, 1, 2, 4];
 function createClock() {
   let speed = Number(getMeta(db, 'time_speed') ?? 1);
   let timer = null;
+  let lastTickAt = Date.now();
 
   function tickOnce() {
     const r = runTick(db);
+    lastTickAt = Date.now();
     if (r.tick % 10 === 0 || r.events.length > 0) {
       console.log(`  tick ${r.tick} — ${r.planets} planètes, ${r.durationMs} ms`
         + (r.events.length ? ` — ${r.events.length} événement(s)` : ''));
@@ -73,6 +75,10 @@ function createClock() {
   return {
     speeds: SPEEDS,
     getSpeed: () => speed,
+    // Fraction (0..1) du tick courant déjà écoulée — le client s'en sert
+    // pour interpoler les positions (vaisseaux, convois) entre deux ticks.
+    getProgress: () => speed === 0 ? 0
+      : Math.min(1, (Date.now() - lastTickAt) / (CONFIG.TICK_MS / speed)),
     setSpeed(s) {
       speed = s;
       setMeta(db, 'time_speed', s);
@@ -85,6 +91,7 @@ function createClock() {
         runTick(db);
         played++;
       }
+      lastTickAt = Date.now();
       return played;
     },
     start: reschedule,

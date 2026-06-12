@@ -84,7 +84,8 @@ export function tickTraders(db, tick) {
 
   const systemOf = db.prepare('SELECT system_id FROM planets WHERE id = ?');
   const depart = db.prepare(
-    'UPDATE traders SET planet_id = NULL, dest_planet_id = ?, arrival_tick = ?, credits = ROUND(MAX(0, credits - ?), 2) WHERE id = ?'
+    `UPDATE traders SET planet_id = NULL, from_planet_id = ?, departure_tick = ?,
+     dest_planet_id = ?, arrival_tick = ?, credits = ROUND(MAX(0, credits - ?), 2) WHERE id = ?`
   );
   const saveCargo = db.prepare(
     'UPDATE traders SET credits = ?, cargo_resource = ?, cargo_qty = ?, cargo_cost = ?, trades_done = trades_done + 1 WHERE id = ?'
@@ -116,7 +117,7 @@ export function tickTraders(db, tick) {
         : -1;
 
       if (extraElsewhere > 0) {
-        depart.run(best.planet_id, tick + travelTicks(dist(best)),
+        depart.run(trader.planet_id, tick, best.planet_id, tick + travelTicks(dist(best)),
           dist(best) * T.MOVE_COST_PER_DIST, trader.id);
       } else {
         const sale = applyMarketTrade(db, trader.planet_id, trader.cargo_resource,
@@ -156,7 +157,7 @@ export function tickTraders(db, tick) {
       saveCargo.run(Math.round((trader.credits - buy.total) * 100) / 100,
         best.resourceId, best.qty, buy.unitPrice, trader.id);
       const d = dist(best.dest);
-      depart.run(best.dest.planet_id, tick + travelTicks(d),
+      depart.run(trader.planet_id, tick, best.dest.planet_id, tick + travelTicks(d),
         d * T.MOVE_COST_PER_DIST, trader.id);
     } else if (Math.random() < 0.35) {
       // Rien d'intéressant ici : on va voir ailleurs.
@@ -164,7 +165,7 @@ export function tickTraders(db, tick) {
       if (elsewhere.length > 0) {
         const target = elsewhere[Math.floor(Math.random() * elsewhere.length)];
         const d = dist(target);
-        depart.run(target.planet_id, tick + travelTicks(d),
+        depart.run(trader.planet_id, tick, target.planet_id, tick + travelTicks(d),
           d * T.MOVE_COST_PER_DIST, trader.id);
       }
     }

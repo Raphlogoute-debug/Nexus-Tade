@@ -16,6 +16,9 @@
 
 * { box-sizing: border-box; }
 
+/* L'attribut hidden doit gagner même quand une règle pose un display. */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
@@ -45,7 +48,10 @@ h1 {
   font-weight: 600;
 }
 
-h1 span { color: var(--accent); }
+h1 span {
+  color: var(--accent);
+  text-shadow: 0 0 16px rgba(83, 199, 240, 0.45);
+}
 
 .header-stats { display: flex; gap: 22px; }
 
@@ -80,6 +86,7 @@ h1 span { color: var(--accent); }
   font-size: 12px;
   padding: 2px 9px;
   cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
 }
 .time-btn:hover { border-color: var(--accent); color: var(--text); }
 .time-btn.active { color: var(--accent); border-color: var(--accent); }
@@ -121,10 +128,53 @@ main { flex: 1; display: flex; min-height: 0; }
   flex: 1;
   min-width: 0;
   background:
-    radial-gradient(ellipse at 30% 20%, #0e1320 0%, var(--bg) 60%);
+    radial-gradient(ellipse at 30% 20%, #0d1322 0%, #070a10 65%);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.55);
 }
 
-#map { display: block; width: 100%; height: 100%; cursor: crosshair; }
+#map { display: block; width: 100%; height: 100%; cursor: grab; }
+
+/* ── Contrôles de la carte ─────────────────────────────────── */
+
+#map-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 3;
+}
+#map-controls button {
+  width: 36px;
+  height: 30px;
+  background: rgba(16, 20, 29, 0.88);
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+#map-controls button:hover { color: var(--accent); border-color: var(--accent); }
+#map-controls #traffic-toggle {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--accent);
+}
+#map-controls #traffic-toggle.off { color: var(--dim); }
+
+#map-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 3;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--dim);
+  opacity: 0.75;
+  pointer-events: none;
+}
 
 /* ── Barre d'alertes ───────────────────────────────────────── */
 
@@ -184,17 +234,47 @@ main { flex: 1; display: flex; min-height: 0; }
 #tooltip {
   position: absolute;
   pointer-events: none;
-  background: var(--panel-2);
+  background: rgba(16, 20, 29, 0.94);
   border: 1px solid var(--border);
-  padding: 4px 8px;
+  padding: 6px 9px;
   font-size: 12px;
+  line-height: 1.45;
   white-space: nowrap;
   z-index: 2;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
 }
 
 /* ── Panneau gauche ─────────────────────────────────────────── */
 
 .hint { color: var(--dim); line-height: 1.5; }
+
+ul.legend { list-style: none; margin: 0; padding: 0; font-size: 11px; }
+ul.legend li { padding: 3px 0; }
+.lg { display: inline-block; min-width: 12px; text-align: center; }
+.lg.star {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, #ffd9a0 40%, transparent 75%);
+  vertical-align: -1px;
+}
+.lg.ship { color: var(--accent); font-size: 9px; }
+.lg.convoy { width: 7px; height: 7px; background: #b07dd6; vertical-align: 0; }
+.lg.trader {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #c3d6e8; vertical-align: 0;
+}
+.lg.capital { color: var(--amber); }
+.lg.front { color: #f04545; }
+.lg.claim { color: var(--amber); }
+
+/* Barres de défilement discrètes, assorties au thème. */
+#panel-content::-webkit-scrollbar, #journal::-webkit-scrollbar { width: 8px; }
+#panel-content::-webkit-scrollbar-thumb, #journal::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+#panel-content::-webkit-scrollbar-thumb:hover,
+#journal::-webkit-scrollbar-thumb:hover { background: #2c3850; }
+#panel-content, #journal { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
 .panel-title {
   font-size: 15px;
@@ -232,8 +312,9 @@ main { flex: 1; display: flex; min-height: 0; }
   font-size: 13px;
   cursor: pointer;
   text-align: left;
+  transition: border-color 0.15s, background 0.15s;
 }
-.planet-row:hover { border-color: var(--accent); }
+.planet-row:hover { border-color: var(--accent); background: #1a2232; }
 
 .biome-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .planet-row .meta { margin-left: auto; color: var(--dim); font-size: 11px; text-align: right; }
@@ -306,6 +387,7 @@ tr.tier-row td {
   padding: 6px 12px;
   cursor: pointer;
   margin: 3px 4px 3px 0;
+  transition: border-color 0.15s, color 0.15s;
 }
 .action-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .action-btn:disabled { opacity: 0.45; cursor: default; }
@@ -407,6 +489,7 @@ tr.res-row.selected td { background: #1a2334; }
   padding: 3px 8px;
   cursor: pointer;
   white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
 }
 .fleet-chip:hover { border-color: var(--accent); }
 .fleet-chip.selected { border-color: var(--accent); color: var(--text); }
