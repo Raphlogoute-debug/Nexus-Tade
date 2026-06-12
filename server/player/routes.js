@@ -153,7 +153,23 @@ function tryDepart(db, ship, destPlanetId, tick) {
   if (fresh.fuel < fresh.fuel_capacity * CONFIG.AUTOMATION.REFUEL_BELOW) {
     refuel(db, undefined, ship.id);
   }
-  startTravel(db, destPlanetId, tick, ship.id, 'auto'); // échec (découvert…) → on réessaie au tick suivant
+  // Couloir sécurisé : la route peut imposer l'escorte sur CHAQUE trajet
+  // (sinon, escorte automatique en zone dangereuse seulement).
+  const alwaysEscort = ship.route_id && db.prepare(
+    'SELECT always_escort FROM routes WHERE id = ?').get(ship.route_id)?.always_escort;
+  const trip = startTravel(db, destPlanetId, tick, ship.id, alwaysEscort ? true : 'auto');
+  if (!trip.ok && alwaysEscort) {
+    startTravel(db, destPlanetId, tick, ship.id, 'auto'); // caisse vide : on part quand même
+  }
+}
+
+// Bascule « couloir sécurisé » d'une route.
+export function setRouteEscort(db, routeId, on) {
+  if (!db.prepare('SELECT 1 FROM routes WHERE id = ?').get(routeId)) {
+    return { ok: false, error: 'route inconnue' };
+  }
+  db.prepare('UPDATE routes SET always_escort = ? WHERE id = ?').run(on ? 1 : 0, routeId);
+  return { ok: true, routeId, escorted: Boolean(on) };
 }
 
 // Exécute une action ; retourne un résumé lisible, ou null si rien bougé.

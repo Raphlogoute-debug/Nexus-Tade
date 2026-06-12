@@ -38,7 +38,7 @@ export function listMissions(db) {
 
 // ── Création / annulation ────────────────────────────────────────
 
-export function createMission(db, { resourceId, quantity, fromPlanetId, toPlanetId }) {
+export function createMission(db, { resourceId, quantity, fromPlanetId, toPlanetId, recurring = false }) {
   if (!RESOURCES[resourceId]) return { ok: false, error: 'ressource inconnue' };
   if (!Number.isFinite(quantity) || quantity < 1) return { ok: false, error: 'quantité invalide' };
   if (fromPlanetId === toPlanetId) return { ok: false, error: 'destination identique à la source' };
@@ -66,16 +66,18 @@ export function createMission(db, { resourceId, quantity, fromPlanetId, toPlanet
   let id;
   db.transaction(() => {
     id = db.prepare(
-      `INSERT INTO missions (ship_id, resource_id, quantity, from_planet_id, to_planet_id, created_tick)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO missions (ship_id, resource_id, quantity, from_planet_id, to_planet_id,
+         created_tick, recurring, quantity0)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(ship.id, resourceId, Math.round(quantity), fromPlanetId, toPlanetId,
-      getCurrentTick(db)).lastInsertRowid;
+      getCurrentTick(db), recurring ? 1 : 0, Math.round(quantity)).lastInsertRowid;
     db.prepare("UPDATE ships SET mode = 'mission', route_id = NULL, route_stop = 0 WHERE id = ?")
       .run(ship.id);
   })();
   return {
     ok: true, id, shipName: ship.name, quantity: Math.round(quantity),
     resourceName: RESOURCES[resourceId].name, destName: dest.name,
+    recurring: Boolean(recurring),
   };
 }
 
@@ -138,9 +140,16 @@ export function tickMissions(db, tick) {
           `MISSION — ${ship.name} : vente impossible à destination (${sale.error}) — mission interrompue`);
         continue;
       }
-      const left = Math.max(0, Math.round((m.quantity - qty) * 100) / 100);
-      db.prepare('UPDATE missions SET quantity = ? WHERE id = ?').run(left, m.id);
+      let left = Math.max(0, Math.round((m.quantity - qty) * 100) / 100);
       const destName = db.prepare('SELECT name FROM planets WHERE id = ?').get(m.to_planet_id).name;
+      if (left <= 0 && m.recurring) {
+        // Mission récurrente : la rotation se réarme toute seule.
+        left = m.quantity0;
+        logEvent(db, tick, 'mission',
+          `MISSION ♻ — ${ship.name} : rotation accomplie à ${destName}`
+          + ` (+${Math.round(sale.total)} cr), on remet ça`);
+      }
+      db.prepare('UPDATE missions SET quantity = ? WHERE id = ?').run(left, m.id);
       if (left <= 0) {
         endMission(db, m, ship, tick,
           `MISSION ACCOMPLIE — ${ship.name} a vendu ${Math.round(qty)} ${resName}`

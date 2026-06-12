@@ -313,6 +313,14 @@ export const CONFIG = {
     CORNER_MIN_CREDITS: 120000, // il faut les reins solides pour accaparer
     HISTORY_EVERY: 10,       // échantillonnage de la valeur nette (ticks)
     HISTORY_KEEP: 120,       // points conservés par sujet
+    // La course aux filons : les maisons riches achètent des concessions
+    // sur les gisements riches — le filon que vous lorgnez peut partir.
+    CLAIM_CHANCE: 0.05,      // par délibération, si assez riche
+    CLAIM_MIN_CREDITS: 60000,
+    CLAIM_COST: 25000,       // ce que ça leur coûte (× 2^possessions)
+    CLAIM_MIN_QUALITY: 1.3,  // ils ne visent que les bons filons
+    CLAIM_RATE: 80,          // extraction/tick (vendue sur place à 60 %)
+    CLAIM_SELL_SHARE: 0.6,
   },
 
   TRADERS: {
@@ -432,6 +440,65 @@ export const CONFIG = {
     STANDING_REQUIRED: 25,  // réputation pour signer
     STANDING_FLOOR: 10,     // en dessous, le pacte est dénoncé
     CONTRACT_REQ_MULT: 0.5, // seuils des contrats de faction × 0,5
+  },
+
+  // Grands chantiers (Phase 15) : les mégaprojets des factions — un
+  // programme d'achat massif et durable à la capitale, à prix garanti.
+  // LE débouché des Léviathans et des concessions niveau 6. Le chantier
+  // absorbe aussi un filet depuis son propre marché : il finit par se
+  // faire sans vous — lentement.
+  MEGAPROJECTS: {
+    CHECK_EVERY: 50,
+    SPAWN_CHANCE: 0.25,    // par vérification, si moins de MAX_ACTIVE
+    MAX_ACTIVE: 2,
+    PREMIUM: 1.25,         // prix payé = base × premium (fixé au lancement)
+    SELF_SUPPLY: 0.15,     // part du stock capital absorbée par tick (filet)
+    EXPIRES: 900,          // ticks pour finir le chantier
+    PRESTIGE: 600,         // au plus gros contributeur (si ≥ MIN_SHARE)
+    MIN_SHARE: 0.25,
+    STANDING_BONUS: 20,
+    POP_BOOST: 1.1,        // la capitale grandit à l'achèvement
+    TYPES: [
+      { id: 'jump_gate', name: 'Porte de saut',
+        needs: { steel: 60000, hull_plates: 25000, fusion_cells: 9000, adv_components: 4000 } },
+      { id: 'world_station', name: 'Station-monde',
+        needs: { steel: 80000, polymers: 30000, electronics: 12000, ship_modules: 3000 } },
+      { id: 'colony_ark', name: 'Arche de colonisation',
+        needs: { hull_plates: 35000, synth_food: 40000, meds: 8000, jump_drives: 600 } },
+    ],
+  },
+
+  // Colonies naissantes (Phase 15) : un petit monde de la Frange entre en
+  // plein boom — population qui explose, demande qui suit. Y arriver
+  // premier (concession et comptoir à moitié prix pendant le boom).
+  COLONIES: {
+    CHECK_EVERY: 120,
+    SPAWN_CHANCE: 0.35,
+    MAX_POP: 5,           // candidat : petite planète (M hab.)
+    BOOM_TICKS: 400,
+    GROWTH: 1.012,        // ×/tick pendant le boom (≈ ×120 sur la durée)
+    DISCOUNT: 0.5,        // concessions/comptoirs à moitié prix pendant le boom
+  },
+
+  // Repaires pirates (Phase 15) : ils s'installent dans la Frange et
+  // grossissent tant qu'on les laisse prospérer — le danger des couloirs
+  // voisins grimpe. Payer des mercenaires les rase.
+  LAIRS: {
+    CHECK_EVERY: 60,
+    SPAWN_CHANCE: 0.3,
+    MAX_LAIRS: 4,
+    GROWTH_EVERY: 40,      // la force monte d'un cran tous les N ticks
+    MAX_STRENGTH: 4,
+    DANGER_PER_STRENGTH: 0.04, // ajouté au risque du système (et voisins ÷2)
+    NEIGHBOR_RADIUS: 300,
+    CLEAR_BASE: 8000,      // mercenaires : base + force × palier
+    CLEAR_PER_STRENGTH: 5000,
+  },
+
+  // Prospection (Phase 15) : sonder les gisements d'un système (vaisseau
+  // sur place) — la géologie se mémorise et s'affiche en mode « filons ».
+  PROSPECTING: {
+    COST_PER_PLANET: 40,
   },
 
   // Vaisseaux en mode automatique : même logique gloutonne que les

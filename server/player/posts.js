@@ -143,7 +143,12 @@ export function buyPost(db, shipId) {
   if (owned >= max) {
     return { ok: false, error: `maximum ${max} comptoirs (Réseau de courtage pour aller plus loin)` };
   }
-  const price = P.BASE_PRICE * 2 ** owned;
+  const boom = db.prepare(
+    `SELECT 1 FROM colonies WHERE planet_id = ? AND boom_until > (
+       SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'current_tick')`
+  ).get(ship.planet_id);
+  const price = Math.round(P.BASE_PRICE * 2 ** owned
+    * (boom ? CONFIG.COLONIES.DISCOUNT : 1));
   if (player.credits < price) return { ok: false, error: `crédits insuffisants (${price} cr)` };
 
   let id;

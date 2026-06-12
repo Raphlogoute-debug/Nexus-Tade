@@ -36,6 +36,7 @@
     <button id="btn-wars" class="time-btn nav-btn" title="Tableau de bord du profiteur de guerre">GUERRES</button>
     <button id="btn-objectives" class="time-btn nav-btn" title="Jalons de carrière et victoire">OBJECTIFS</button>
     <button id="btn-house" class="time-btn nav-btn" title="Maison de commerce, QG, classement">MAISON</button>
+    <button id="btn-eco" class="time-btn nav-btn" title="Observatoire : courbes de l'empire, grands chantiers, repaires">ÉCO</button>
     <button id="btn-help" class="time-btn nav-btn" title="Aide et légende de la carte">?</button>
     <span id="time-controls">
       <button class="time-btn" data-speed="0" title="Pause">⏸</button>
@@ -94,6 +95,7 @@
         <button id="zoom-fit" title="Voir toute la galaxie">⛶</button>
         <button id="zoom-ship" title="Centrer sur le vaisseau piloté">◎</button>
         <button id="traffic-toggle" title="Afficher / masquer le trafic (convois et marchands)">trafic</button>
+        <button id="geo-toggle" class="off" title="Carte des filons : qualité géologique sondée (⛏ depuis la vue système)">filons</button>
         <button id="mute-toggle" title="Couper / remettre les sons">♪</button>
       </div>
       <div id="map-hint">molette : zoom · glisser : déplacer · clic : sélectionner</div>
@@ -120,6 +122,15 @@
       <div id="new-save-form" class="info-block">
         <input type="text" id="new-save-name" placeholder="Nom de la partie" maxlength="40">
         <div id="scenario-list"></div>
+        <div class="row" style="margin-top:10px"><span>Rivaux</span><span>
+          <select id="set-rivals"><option value="0">aucun</option><option value="2">2</option>
+            <option value="4" selected>4</option><option value="7">7</option></select></span></div>
+        <div class="row" style="margin-top:4px"><span>Pirates</span><span>
+          <select id="set-piracy"><option value="rares">rares</option>
+            <option value="normaux" selected>normaux</option><option value="feroces">féroces</option></select></span></div>
+        <div class="row" style="margin-top:4px"><span>Univers</span><span>
+          <select id="set-universe"><option value="compact">compact (40-60 systèmes)</option>
+            <option value="normal" selected>normal (60-100)</option><option value="vaste">vaste (100-150)</option></select></span></div>
         <div class="row" style="margin-top:8px">
           <span><input type="number" id="new-save-seed" placeholder="seed (option)" min="1" title="Même seed = même univers"></span>
           <span><button class="action-btn primary" id="new-save-go">Fonder la maison</button></span>

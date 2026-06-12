@@ -15,12 +15,24 @@ import { declareWar } from './factions/diplomacy.js';
 
 // Crée une partie complète dans un fichier neuf : univers procédural,
 // factions, marchands, maisons rivales, joueur selon le scénario.
-export function createGame(path, { seed, scenario, houseName, houseColor } = {}) {
+// Réglages de partie : nombre de rivaux, agressivité des pirates,
+// densité de l'univers — fixés à la création, gravés en meta.
+const UNIVERSE_SIZES = {
+  compact: { minSystems: 40, maxSystems: 60 },
+  normal: {},
+  vaste: { minSystems: 100, maxSystems: 150 },
+};
+const PIRACY_LEVELS = { rares: 0.5, normaux: 1, feroces: 1.5 };
+
+export function createGame(path, { seed, scenario, houseName, houseColor, settings = {} } = {}) {
   const db = createDb(path);
-  const gen = generateUniverse(db, seed >>> 0);
+  const size = UNIVERSE_SIZES[settings.universe] ?? {};
+  const gen = generateUniverse(db, seed >>> 0, size);
   generateFactions(db);
   initTraders(db);
-  initRivals(db);
+  const rivalCount = Number.isInteger(settings.rivals) ? settings.rivals : CONFIG.RIVALS.COUNT;
+  initRivals(db, rivalCount);
+  setMeta(db, 'piracy_mult', PIRACY_LEVELS[settings.piracy] ?? 1);
   const init = initPlayer(db, { scenarioId: scenario, houseName, houseColor });
 
   if (init.scenario.startWar) startInitialWar(db);

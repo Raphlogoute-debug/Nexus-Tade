@@ -79,7 +79,7 @@ export function listSaves(dir, activeFile = null, activeDb = null) {
 }
 
 // Crée une nouvelle sauvegarde et renvoie son nom de fichier.
-export function newSave(dir, { name, scenario, seed } = {}) {
+export function newSave(dir, { name, scenario, seed, settings } = {}) {
   ensureSavesDir(dir);
   const scn = SCENARIO_BY_ID[scenario] ? scenario : DEFAULT_SCENARIO;
   const saveName = String(name ?? '').trim().slice(0, 40) || 'Nouvelle partie';
@@ -91,7 +91,7 @@ export function newSave(dir, { name, scenario, seed } = {}) {
   while (fs.existsSync(path.join(dir, file))) file = `${slug(saveName)}-${n++}.db`;
 
   const full = path.join(dir, file);
-  const { db } = createGame(full, { seed: usedSeed, scenario: scn, houseName: saveName });
+  const { db } = createGame(full, { seed: usedSeed, scenario: scn, houseName: saveName, settings });
   db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('save_name', saveName);
   db.close();
   return { file, saveName, scenario: scn, seed: usedSeed };

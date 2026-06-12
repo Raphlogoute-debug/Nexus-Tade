@@ -8,16 +8,28 @@
 
 import { CONFIG } from '../config.js';
 import { RESOURCES } from '../../data/resources.js';
+import { getMeta } from '../db.js';
 import { warContext } from './war.js';
+import { lairDanger } from '../economy/frontier.js';
 import { logEvent } from '../events.js';
 
 const P = CONFIG.PIRACY;
 
+// Agressivité des pirates : réglage de partie (0,5 / 1 / 1,5).
+function piracyMult(db) {
+  return Number(getMeta(db, 'piracy_mult') ?? 1);
+}
+
 // Danger d'un système : probabilité d'interception par tick de transit.
+// Les repaires pirates voisins en rajoutent — tant qu'on les laisse vivre.
 export function systemDanger(db, systemId, ctx = warContext(db)) {
-  if (ctx.frontSystems.has(systemId)) return P.CHANCE_FRONT;
-  const row = db.prepare('SELECT faction_id FROM systems WHERE id = ?').get(systemId);
-  return row?.faction_id === null ? P.CHANCE_FRINGE : P.CHANCE_CORE;
+  let base;
+  if (ctx.frontSystems.has(systemId)) base = P.CHANCE_FRONT;
+  else {
+    const row = db.prepare('SELECT faction_id FROM systems WHERE id = ?').get(systemId);
+    base = row?.faction_id === null ? P.CHANCE_FRINGE : P.CHANCE_CORE;
+  }
+  return (base + lairDanger(db, systemId)) * piracyMult(db);
 }
 
 // Danger d'un trajet : l'espace le plus dangereux des deux bouts.

@@ -13,13 +13,15 @@ import { RESOURCES, RESOURCE_IDS } from '../../data/resources.js';
 import { createRng } from '../universe/rng.js';
 import { getMeta } from '../db.js';
 import { applyMarketTrade, marketContext } from '../economy/market.js';
+import { depositQuality, depositLabel } from '../player/concession.js';
+import { BIOMES } from '../../data/biomes.js';
 import { logEvent } from '../events.js';
 
 const R = CONFIG.RIVALS;
 
-export function initRivals(db) {
+export function initRivals(db, count = R.COUNT) {
   const planets = db.prepare('SELECT id FROM planets').all();
-  if (planets.length === 0) return { rivals: 0 };
+  if (planets.length === 0 || count <= 0) return { rivals: 0 };
   const rng = createRng((Number(getMeta(db, 'seed')) ^ 0x1d2c3b4a) >>> 0);
 
   // Noms et couleurs tirés sans répétition.
@@ -29,14 +31,14 @@ export function initRivals(db) {
     'INSERT INTO rivals (name, color, credits, net_worth, home_planet_id) VALUES (?, ?, ?, ?, ?)'
   );
   db.transaction(() => {
-    for (let i = 0; i < R.COUNT && names.length > 0; i++) {
+    for (let i = 0; i < count && names.length > 0; i++) {
       const name = names.splice(Math.floor(rng.next() * names.length), 1)[0];
       const color = colors.splice(Math.floor(rng.next() * colors.length), 1)[0] ?? '#9ab1c6';
       const home = planets[Math.floor(rng.next() * planets.length)].id;
       insert.run(name, color, R.START_CREDITS, R.START_CREDITS, home);
     }
   })();
-  return { rivals: Math.min(R.COUNT, R.NAMES.length) };
+  return { rivals: Math.min(count, R.NAMES.length) };
 }
 
 // Valeur des réserves d'une maison, au prix de base (stable).
@@ -50,7 +52,11 @@ function holdingsValue(db, rivalId) {
 }
 
 export function rivalNetWorth(db, rival) {
-  return Math.round((rival.credits + holdingsValue(db, rival.id)) * 100) / 100;
+  const claims = db.prepare(
+    'SELECT COUNT(*) AS n FROM rival_concessions WHERE rival_id = ?').get(rival.id).n;
+  let claimsValue = 0;
+  for (let i = 0; i < claims; i++) claimsValue += R.CLAIM_COST * 2 ** i;
+  return Math.round((rival.credits + holdingsValue(db, rival.id) + claimsValue) * 100) / 100;
 }
 
 const upsertHolding = `
@@ -138,9 +144,66 @@ function maybeStartCorner(db, rival, tick, planetIds) {
     `★ ${rival.name} accapare le ${RESOURCES[rid].name} sur ${planet.name} — le prix va grimper`);
 }
 
+// La course aux filons : une maison riche s'offre une concession sur un
+// gisement riche encore libre — le filon que vous lorgnez peut partir.
+function maybeClaimDeposit(db, rival, tick) {
+  if (rival.credits < R.CLAIM_MIN_CREDITS || Math.random() >= R.CLAIM_CHANCE) return;
+  const owned = db.prepare(
+    'SELECT COUNT(*) AS n FROM rival_concessions WHERE rival_id = ?').get(rival.id).n;
+  const cost = R.CLAIM_COST * 2 ** owned;
+  if (rival.credits < cost) return;
+
+  // Un échantillon de planètes libres : ni à vous, ni à un rival.
+  const candidates = db.prepare(
+    `SELECT p.id, p.name, p.biome FROM planets p
+     WHERE p.biome IN ('rocky', 'volcanic', 'desert')
+       AND p.id NOT IN (SELECT planet_id FROM concessions)
+       AND p.id NOT IN (SELECT planet_id FROM rival_concessions)
+     ORDER BY RANDOM() LIMIT 25`
+  ).all();
+  const rich = candidates
+    .map((p) => ({ ...p, quality: depositQuality(db, p.id) }))
+    .filter((p) => p.quality >= R.CLAIM_MIN_QUALITY)
+    .sort((a, b) => b.quality - a.quality)[0];
+  if (!rich) return;
+
+  // La ressource phare du biome local, comme pour le joueur.
+  const resourceId = Object.entries(BIOMES[rich.biome].extraction)
+    .sort((a, b) => b[1] - a[1])[0][0];
+  db.prepare(
+    `INSERT INTO rival_concessions (planet_id, rival_id, resource_id, acquired_tick)
+     VALUES (?, ?, ?, ?)`
+  ).run(rich.id, rival.id, resourceId, tick);
+  db.prepare('UPDATE rivals SET credits = ROUND(credits - ?, 2) WHERE id = ?')
+    .run(cost, rival.id);
+  rival.credits -= cost;
+  logEvent(db, tick, 'rival',
+    `★ ${rival.name} ouvre une concession sur ${rich.name} — filon ${depositLabel(rich.quality)}`
+    + ` ×${rich.quality}. La course aux filons est lancée`);
+}
+
+// Les concessions rivales produisent et vendent sur place : l'offre
+// locale monte (prix en baisse), leur trésorerie aussi.
+function tickRivalConcessions(db) {
+  const rows = db.prepare(
+    `SELECT rc.*, r.id AS rid FROM rival_concessions rc
+     JOIN rivals r ON r.id = rc.rival_id`
+  ).all();
+  for (const rc of rows) {
+    const qty = Math.round(R.CLAIM_RATE * depositQuality(db, rc.planet_id));
+    const m = marketContext(db, rc.planet_id, rc.resource_id);
+    db.prepare(
+      'UPDATE planet_resources SET stock = ROUND(stock + ?, 2) WHERE planet_id = ? AND resource_id = ?'
+    ).run(qty, rc.planet_id, rc.resource_id);
+    db.prepare('UPDATE rivals SET credits = ROUND(credits + ?, 2) WHERE id = ?')
+      .run(Math.round(qty * m.price * R.CLAIM_SELL_SHARE * 100) / 100, rc.rival_id);
+  }
+}
+
 export function tickRivals(db, tick) {
   const rivals = db.prepare('SELECT * FROM rivals').all();
   if (rivals.length === 0) return;
+  tickRivalConcessions(db);
 
   // Un échantillon de planètes partagé par tous les rivaux de ce tick.
   const sample = db.prepare(
@@ -157,6 +220,7 @@ export function tickRivals(db, tick) {
       if ((tick + rival.id) % R.ACT_EVERY !== 0) continue;
       tryArbitrage(db, rival, sample);
       maybeStartCorner(db, rival, tick, sample);
+      maybeClaimDeposit(db, rival, tick);
     }
 
     // Valeur nette : recalcul à chaque tick (peu de rivaux), historisée
@@ -176,6 +240,18 @@ function recordNetWorthHistory(db, tick) {
   const ins = db.prepare(
     'INSERT OR REPLACE INTO networth_history (subject, tick, value) VALUES (?, ?, ?)');
   ins.run('player', tick, value);
+  // L'observatoire : CA, volumes et trésorerie de l'empire dans le temps.
+  const pl = db.prepare(
+    'SELECT credits, total_revenue, total_units_sold FROM player WHERE id = 1').get();
+  if (pl) {
+    db.prepare(
+      'INSERT OR REPLACE INTO empire_history (tick, revenue, units_sold, credits) VALUES (?, ?, ?, ?)'
+    ).run(tick, pl.total_revenue ?? 0, pl.total_units_sold ?? 0, pl.credits);
+    db.prepare(
+      `DELETE FROM empire_history WHERE tick <= (
+         SELECT COALESCE(MAX(tick), 0) - ? FROM empire_history)`
+    ).run(R.HISTORY_KEEP * R.HISTORY_EVERY);
+  }
   for (const r of db.prepare('SELECT id, net_worth FROM rivals').all()) {
     ins.run(`rival:${r.id}`, tick, r.net_worth);
   }

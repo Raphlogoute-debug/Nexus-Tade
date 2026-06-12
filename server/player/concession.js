@@ -220,6 +220,11 @@ export function buyConcession(db, shipId) {
   const ship = getShip(db, shipId);
   if (!ship || ship.planet_id === null) return { ok: false, error: 'vaisseau en transit' };
   if (getConcessionAt(db, ship.planet_id)) return { ok: false, error: 'vous avez déjà une concession ici' };
+  // La course aux filons : une maison rivale est passée avant vous.
+  const claim = db.prepare(
+    `SELECT r.name FROM rival_concessions rc JOIN rivals r ON r.id = rc.rival_id
+     WHERE rc.planet_id = ?`).get(ship.planet_id);
+  if (claim) return { ok: false, error: `${claim.name} exploite déjà ce filon — trop tard` };
   if (!hasTech(db, 'prospection')) return { ok: false, error: 'technologie Prospection planétaire requise' };
 
   const owned = db.prepare('SELECT COUNT(*) AS n FROM concessions').get().n;
@@ -229,7 +234,13 @@ export function buyConcession(db, shipId) {
   const planet = db.prepare('SELECT biome, name FROM planets WHERE id = ?').get(ship.planet_id);
   const extraction = BIOMES[planet.biome].extraction;
   const resourceId = Object.entries(extraction).sort((a, b) => b[1] - a[1])[0][0];
-  const price = FAC.CONCESSION_BASE_PRICE * 2 ** (owned - 1);
+  // Colonie en plein boom : les pionniers paient moitié prix.
+  const boom = db.prepare(
+    `SELECT 1 FROM colonies WHERE planet_id = ? AND boom_until > (
+       SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'current_tick')`
+  ).get(ship.planet_id);
+  const price = Math.round(FAC.CONCESSION_BASE_PRICE * 2 ** (owned - 1)
+    * (boom ? CONFIG.COLONIES.DISCOUNT : 1));
   if (getPlayer(db).credits < price) return { ok: false, error: `crédits insuffisants (${price} cr)` };
 
   let id;

@@ -68,6 +68,11 @@ const state = {
   tickSync: null, // { at, progress, periodMs } : interpolation sous-tick
   house: null, // identité de la maison (nom, blason, QG, renom)
   newSaveScenario: 'colporteur',
+  newSaveSettings: { rivals: 4, piracy: 'normaux', universe: 'normal' },
+  lairs: [], // repaires pirates { system_id, strength }
+  rivalClaims: [], // concessions rivales { system_id, planet_id, color, name }
+  surveys: null, // sondages géologiques { planetId, systemId, quality }
+  geoMap: false, // mode carte « filons »
 };
 
 function selectedShip() {
@@ -638,7 +643,13 @@ function drawSystems(t) {
     // gris éteint quand on n'a aucune donnée.
     let color;
     let alpha;
-    if (state.heatmap) {
+    if (state.geoMap) {
+      // Carte des filons : qualité sondée (gris = pas encore sondé).
+      const q = state.geoBySystem?.get(sys.id);
+      color = q === undefined ? '#3a4150'
+        : q >= 1.7 ? '#e8b35a' : q >= 1.3 ? '#5fd68b' : q >= 0.8 ? '#9ab1c6' : '#f07861';
+      alpha = q === undefined ? 0.45 : 1;
+    } else if (state.heatmap) {
       const ratio = state.heatmap.bySystem.get(sys.id);
       color = ratio === undefined ? '#3a4150' : heatColor(Math.round(ratio * 20) / 20);
       alpha = ratio === undefined ? 0.55 : 1;
@@ -720,6 +731,27 @@ function drawCorners(sx, sy, d, color) {
 }
 
 function drawPlayerAssets() {
+  // Repaires pirates : double anneau rouge sombre, qui s'épaissit avec la force.
+  for (const lair of state.lairs) {
+    const sys = state.universe.systems.find((x) => x.id === lair.system_id);
+    if (!sys) continue;
+    const [sx, sy] = toScreen(sys.x, sys.y);
+    const r = starRadius(sys) + 7;
+    ctx.strokeStyle = 'rgba(200,40,40,0.7)';
+    ctx.lineWidth = 0.8 + lair.strength * 0.5;
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // La course aux filons : les concessions rivales, aux couleurs de leur maison.
+  for (const claim of state.rivalClaims) {
+    const sys = state.universe.systems.find((x) => x.id === claim.system_id);
+    if (!sys) continue;
+    const [sx, sy] = toScreen(sys.x, sys.y);
+    drawCorners(sx, sy, starRadius(sys) + 5, withAlpha(claim.color, 0.85));
+  }
   for (const c of state.player?.concessions ?? []) {
     const entry = state.planetIndex.get(c.planet_id);
     if (!entry) continue;
@@ -1032,6 +1064,28 @@ $('#traffic-toggle').addEventListener('click', (e) => {
   state.showTraffic = !state.showTraffic;
   e.currentTarget.classList.toggle('off', !state.showTraffic);
 });
+// Mode « filons » : la géologie sondée, en couleurs (ambre = exceptionnel).
+async function refreshSurveys() {
+  const surveys = await api('/surveys');
+  state.surveys = surveys;
+  const by = new Map();
+  for (const sv of surveys) {
+    if (!by.has(sv.systemId) || sv.quality > by.get(sv.systemId)) by.set(sv.systemId, sv.quality);
+  }
+  state.geoBySystem = by;
+}
+
+$('#geo-toggle').addEventListener('click', async (e) => {
+  const btn = e.currentTarget; // capturé avant l'await (currentTarget s'efface après)
+  state.geoMap = !state.geoMap;
+  if (state.geoMap) {
+    await refreshSurveys();
+    state.heatmap = null;
+    updateHeatLegend();
+  }
+  btn.classList.toggle('off', !state.geoMap);
+});
+
 $('#mute-toggle').addEventListener('click', (e) => {
   muted = !muted;
   try { localStorage.setItem('nx-muted', muted ? '1' : '0'); } catch { /* privé */ }
@@ -1092,6 +1146,31 @@ async function renderSystemPanel(sys) {
     `;
     row.addEventListener('click', () => selectPlanet(p.id));
     wrap.appendChild(row);
+  }
+
+  // Sonder la géologie du système (vaisseau à quai dans CE système).
+  const shipHereSys = (() => {
+    const sh = selectedShip();
+    if (sh?.planet_id == null) return false;
+    return state.planetIndex.get(sh.planet_id)?.system.id === sys.id;
+  })();
+  if (shipHereSys) {
+    const btn = document.createElement('button');
+    btn.className = 'action-btn';
+    btn.textContent = `⛏ Sonder les gisements du système`;
+    btn.title = 'Révèle la qualité géologique de chaque planète (mode « filons » de la carte)';
+    btn.addEventListener('click', async () => {
+      const r = await apiPost('/surveys', { systemId: sys.id, shipId: selectedShip()?.id });
+      if (r.ok) {
+        log(`Sondage : ${r.surveyed} planètes relevées (−${fmtInt.format(r.cost)} cr) — meilleur filon ×${r.bestQuality}`);
+        toast(`Sondage de ${sys.name} : meilleur filon ×${r.bestQuality}`, r.bestQuality >= 1.3 ? 'good' : 'info');
+        await refreshSurveys();
+        renderSystemPanel(sys);
+      } else {
+        log(`Sondage impossible : ${r.error}`);
+      }
+    });
+    $('#system-actions').appendChild(btn);
   }
 
   // Relevé de marché à distance (si à quai quelque part).
@@ -1173,6 +1252,7 @@ function drawSparkline(points) {
 function panelHeader(planet, extra = '') {
   const supply = planet.supply !== undefined && planet.supply < 0.85
     ? ` · <span class="price-high">approvisionnement ${Math.round(planet.supply * 100)} %</span>` : '';
+  if (planet.colonyBoom) extra += ' <span class="badge age" title="Population en plein boom : tout manque, les pionniers paient moitié prix (concessions, comptoirs)">COLONIE EN BOOM</span>';
   return `
     <button class="back-link" id="back-to-system">← ${planet.system_name}</button>
     <h2 class="panel-title">${planet.name} ${tierBadge(planet.tier)} ${extra}</h2>
@@ -1233,6 +1313,24 @@ function renderDockedPanel(planet, market) {
 
   // Clients : offres d'approvisionnement et contrats signés ici.
   html += clientsSectionHtml(planet);
+
+  // Grand chantier à cette capitale : livraison au prix garanti.
+  for (const mp of planet.megaprojects ?? []) {
+    html += `<div class="section-label">★ Grand chantier — ${mp.name}</div>
+      <div class="info-block" style="border-left:3px solid ${mp.faction_color}">`;
+    for (const n of mp.needs) {
+      const held = (selectedShip()?.cargo ?? []).find((l) => l.resource_id === n.resource_id)?.quantity ?? 0;
+      const full = n.delivered >= n.required;
+      html += `<div class="row"><span>${n.resourceName} ${full ? '✓' : ''}</span>
+        <span>${fmtQty(n.delivered)}/${fmtQty(n.required)} ·
+          <span class="price-low">${fmtPrice.format(n.unit_price)} cr/u</span>
+          ${shipHere && !full && held > 0
+            ? `<button class="action-btn mini mp-deliver" data-mp="${mp.id}" data-res="${n.resource_id}">livrer (${fmtQty(held)})</button>`
+            : ''}</span></div>`;
+    }
+    html += `<div style="color:var(--dim);font-size:11px;margin-top:4px">Prix garanti, volumes
+      massifs — le débouché des Léviathans. Le plus gros fournisseur entre dans la légende.</div></div>`;
+  }
 
   // Industrie : votre concession sur cette planète (ou son achat).
   const c = state.player.concessions.find((x) => x.planet_id === planet.id);
@@ -1301,17 +1399,22 @@ function renderDockedPanel(planet, market) {
       }
     }
   } else if (shipHere && state.player.concessions.length < state.player.maxConcessions) {
-    const dq = planet.depositQuality ?? 1;
-    const dqCls = dq >= 1.3 ? 'price-low' : dq < 0.8 ? 'price-high' : '';
-    html += `
-      <div class="section-label">Industrie</div>
-      <div class="industry">Gisement local :
-        <span class="${dqCls}">${planet.depositLabel} ×${fmtNum.format(dq)}</span>
-        <span class="io">— la prospection paie : les filons riches sont rares</span></div>
-      <button class="action-btn" id="btn-buy-concession">
-        Acheter une concession ici (${fmtQty(state.player.nextConcessionPrice)} cr — Prospection requise)
-      </button>
-    `;
+    html += `<div class="section-label">Industrie</div>`;
+    if (planet.rivalClaim) {
+      html += `<div class="industry"><span style="color:${planet.rivalClaim.color}">⛏ ${planet.rivalClaim.name}</span>
+        <span class="io">exploite déjà ce filon — la course aux filons ne pardonne pas</span></div>`;
+    } else {
+      const dq = planet.depositQuality;
+      const dqCls = dq >= 1.3 ? 'price-low' : dq !== null && dq < 0.8 ? 'price-high' : '';
+      html += dq === null
+        ? `<div class="industry io">Géologie inconnue — sondez le système (vue système, ⛏)</div>`
+        : `<div class="industry">Gisement local :
+            <span class="${dqCls}">${planet.depositLabel} ×${fmtNum.format(dq)}</span>
+            <span class="io">— les filons riches sont rares, et les rivaux rôdent</span></div>`;
+      html += `<button class="action-btn" id="btn-buy-concession">
+          Acheter une concession ici (${fmtQty(state.player.nextConcessionPrice)} cr — Prospection requise)
+        </button>`;
+    }
   }
 
   // Comptoir commercial : entrepôt + ordres permanents qui pèsent sur
@@ -1602,6 +1705,24 @@ function renderDockedPanel(planet, market) {
   });
 
   // — Comptoir : achat, agrandissement, transferts, ordres ————————
+  for (const btn of panel.querySelectorAll('.mp-deliver')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/megaprojects/${btn.dataset.mp}/deliver`, {
+        shipId, resourceId: btn.dataset.res,
+      });
+      if (r.ok) {
+        toast(`Chantier « ${r.projectName} » : ${fmtQty(r.delivered)} ${r.resourceName} livrés (+${fmtQty(r.paid)} cr)`, 'good');
+        playSound('sell');
+        const pos = shipMapPosition(selectedShip());
+        if (pos) addFloater(pos.x, pos.y, `+${fmtQty(r.paid)} cr`, '#5fd68b');
+      } else {
+        log(`Livraison chantier : ${r.error}`);
+      }
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+
   $('#btn-buy-post')?.addEventListener('click', async () => {
     const r = await apiPost('/posts/buy', { shipId });
     if (r.ok) log(`Comptoir ouvert sur ${r.planetName} (−${fmtQty(r.price)} cr) — son marché vous est télégraphié`);
@@ -1809,6 +1930,9 @@ function missionSectionHtml(planet, c) {
       </span></div>
       <div style="margin-top:7px">
         <button class="action-btn primary" id="btn-mission">Envoyer un vaisseau disponible</button>
+        <label class="escort-opt" style="display:inline;margin-left:6px"
+          title="La mission se réarme toute seule à chaque rotation accomplie — l'ordre permanent de l'empire">
+          <input type="checkbox" id="mission-recurring"> ♻ récurrente</label>
       </div>
       <div style="color:var(--dim);font-size:11px;margin-top:5px">Le vaisseau charge ici, vend
         là-bas et revient — rotations automatiques si la quantité dépasse sa soute.
@@ -1816,7 +1940,7 @@ function missionSectionHtml(planet, c) {
   }
   for (const m of missions) {
     html += `<div class="row" style="margin-top:6px">
-      <span>🚀 ${m.ship_name} · ${m.resourceName} → ${m.to_name}</span>
+      <span>🚀 ${m.ship_name} · ${m.resourceName} → ${m.to_name}${m.recurring ? ' ♻' : ''}</span>
       <span>reste ${fmtQty(m.quantity)}${m.carrying > 0 ? ` <span style="color:var(--dim)">(soute ${fmtQty(m.carrying)})</span>` : ''}
       <button class="action-btn mini cancel-mission" data-id="${m.id}" title="Annuler la mission (le vaisseau garde sa cargaison)">✕</button></span></div>`;
   }
@@ -1872,6 +1996,7 @@ async function bindMissionSection(planet) {
       quantity: Number($('#mission-qty').value),
       fromPlanetId: planet.id,
       toPlanetId,
+      recurring: Boolean($('#mission-recurring')?.checked),
     });
     if (r.ok) {
       toast(`${r.shipName} part vendre ${fmtQty(r.quantity)} ${r.resourceName} à ${r.destName}`, 'good');
@@ -2500,6 +2625,119 @@ async function renderFleetPanel() {
 
 $('#btn-fleet').addEventListener('click', renderFleetPanel);
 
+// ── Panneau : observatoire économique (ÉCO) ──────────────────────
+// Les courbes de l'empire (CA/tick, volumes, trésorerie), la rentabilité
+// des routes, les grands chantiers à fournir, les repaires à raser.
+
+function lineSpark(points, color, w = 350, h = 56) {
+  if (points.length < 2) return '<div class="hint">pas encore assez d\'historique</div>';
+  const min = Math.min(...points.map((p) => p.v));
+  const max = Math.max(...points.map((p) => p.v));
+  const span = max - min || 1;
+  const x = (i) => 2 + (i / (points.length - 1)) * (w - 4);
+  const y = (v) => h - 4 - ((v - min) / span) * (h - 14);
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
+  return `<svg width="${w}" height="${h}" class="nw-spark">
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="1.6"/>
+    <text x="2" y="10" fill="#6b7689" font-size="9">${fmtQty(max)}</text>
+    <text x="2" y="${h - 2}" fill="#6b7689" font-size="9">${fmtQty(min)}</text>
+  </svg>`;
+}
+
+async function renderObservatoryPanel() {
+  const obs = await api('/observatory');
+  state.selectedPlanet = null;
+
+  // Dérivées : CA et volume par tick, entre points d'échantillonnage.
+  const hist = obs.history;
+  const deltas = (key) => hist.slice(1).map((p, i) => ({
+    v: Math.max(0, (p[key] - hist[i][key]) / Math.max(1, p.tick - hist[i].tick)),
+  }));
+
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title">Observatoire économique</h2>
+    <p class="panel-sub">Les courbes de l'empire, ses chantiers et ses menaces.</p>
+    <div class="section-label">Chiffre d'affaires / tick</div>
+    ${lineSpark(deltas('revenue'), '#5fd68b')}
+    <div class="section-label">Unités vendues / tick</div>
+    ${lineSpark(deltas('units_sold'), '#53c7f0')}
+    <div class="section-label">Trésorerie</div>
+    ${lineSpark(hist.map((p) => ({ v: p.credits })), '#e8b35a')}
+  `;
+
+  html += `<div class="section-label">Routes par recettes (${obs.routes.length})</div>`;
+  if (obs.routes.length === 0) html += `<div class="industry io">Aucune route encore</div>`;
+  for (const r of obs.routes) {
+    html += `<div class="industry">${r.name}
+      <span class="price-low">+${fmtQty(Math.round(r.earned ?? 0))} cr</span>
+      <button class="action-btn mini route-escort" data-id="${r.id}" data-on="${r.always_escort ? 0 : 1}"
+        title="Couloir sécurisé : escorte payée sur CHAQUE trajet de cette route">
+        ${r.always_escort ? '🛡 sécurisé' : 'sécuriser'}</button></div>`;
+  }
+
+  html += `<div class="section-label">Grands chantiers (${obs.megaprojects.length})</div>`;
+  if (obs.megaprojects.length === 0) {
+    html += `<div class="industry io">Aucun chantier en cours — quand une faction en lance un,
+      c'est le plus gros client de la galaxie</div>`;
+  }
+  for (const mp of obs.megaprojects) {
+    const total = mp.needs.reduce((a, n) => a + n.required, 0);
+    const done = mp.needs.reduce((a, n) => a + n.delivered, 0);
+    const pct = Math.round((done / total) * 100);
+    html += `<div class="info-block" style="border-left:3px solid ${mp.faction_color}">
+      <div class="row"><span><strong>${mp.name}</strong> — ${mp.faction_name}</span>
+        <span>${pct} % · t${mp.expires_tick}</span></div>
+      <div class="gauge"><div style="width:${pct}%;background:${mp.faction_color}"></div></div>
+      <div class="row"><span>Livraison : <span class="goto-link" data-planet="${mp.capital_planet_id}"
+        data-system="${mp.capital_system_id}">${mp.capital_name}</span></span><span></span></div>
+      ${mp.needs.map((n) => `<div class="row"><span>${n.resourceName}</span>
+        <span>${fmtQty(n.delivered)}/${fmtQty(n.required)}
+        <span class="price-low">à ${fmtPrice.format(n.unit_price)} cr</span></span></div>`).join('')}
+    </div>`;
+  }
+
+  html += `<div class="section-label">Repaires pirates (${obs.lairs.length})</div>`;
+  if (obs.lairs.length === 0) html += `<div class="industry io">Aucun repaire connu — les couloirs respirent</div>`;
+  for (const l of obs.lairs) {
+    html += `<div class="industry">☠ ${l.system_name}
+      <span class="io">— force ${l.strength} (le danger des couloirs voisins grimpe)</span>
+      <button class="action-btn mini clear-lair" data-sys="${l.system_id}">
+        raser (${fmtQty(l.clearCost)} cr)</button></div>`;
+  }
+
+  panel.innerHTML = html;
+  enhancePanel();
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+  for (const btn of panel.querySelectorAll('.route-escort')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/routes/${btn.dataset.id}/escort`, { escorted: btn.dataset.on === '1' });
+      if (r.ok) log(r.escorted ? 'Couloir sécurisé : escorte sur chaque trajet' : 'Escorte systématique levée');
+      renderObservatoryPanel();
+    });
+  }
+  for (const btn of panel.querySelectorAll('.clear-lair')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/lairs/${btn.dataset.sys}/clear`);
+      if (r.ok) { toast(`Repaire de ${r.systemName} rasé (−${fmtQty(r.cost)} cr)`, 'good'); playSound('objective'); }
+      else log(`Mercenaires : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      renderObservatoryPanel();
+    });
+  }
+  for (const link of panel.querySelectorAll('.goto-link')) {
+    link.addEventListener('click', () => {
+      const sys = state.universe.systems.find((x) => x.id === Number(link.dataset.system));
+      if (sys) { selectSystem(sys); selectPlanet(Number(link.dataset.planet)); }
+    });
+  }
+}
+
+$('#btn-eco').addEventListener('click', renderObservatoryPanel);
+
 // ── Maison de commerce : identité, QG, classement, statistiques ───
 
 function renderHouseHeader() {
@@ -2833,7 +3071,15 @@ $('#saves-close').addEventListener('click', () => { $('#saves-overlay').hidden =
 $('#new-save-go').addEventListener('click', async () => {
   const name = $('#new-save-name').value.trim() || 'Nouvelle partie';
   const seedRaw = $('#new-save-seed').value;
-  const body = { name, scenario: state.newSaveScenario };
+  const body = {
+    name,
+    scenario: state.newSaveScenario,
+    settings: {
+      rivals: Number($('#set-rivals').value),
+      piracy: $('#set-piracy').value,
+      universe: $('#set-universe').value,
+    },
+  };
   if (seedRaw) body.seed = Number(seedRaw);
   const r = await apiPost('/saves/new', body);
   if (r.ok) location.reload();
@@ -3338,6 +3584,13 @@ async function pollEvents() {
       else if (e.type === 'rival') { toast(e.message, 'warn'); toasted++; }
       else if (e.type === 'peace') { toast(e.message, 'info'); toasted++; }
       else if (e.type === 'client') { toast(e.message, 'good'); toasted++; }
+      else if (e.type === 'megaproject') { toast(e.message, e.message.includes('ABANDONNÉ') ? 'warn' : 'good'); toasted++; }
+      else if (e.type === 'colony') { toast(e.message, 'good'); toasted++; }
+      else if (e.type === 'lair') {
+        toast(e.message, e.message.includes('rasé') ? 'good' : 'bad');
+        if (!e.message.includes('rasé')) playSound('alert');
+        toasted++;
+      }
       else if (e.type === 'pact' && e.message.includes('DÉNONCÉ')) {
         toast(e.message, 'bad'); playSound('alert'); toasted++;
       }
@@ -3412,6 +3665,8 @@ async function poll() {
     state.speed = s.speed;
     state.wars = s.wars;
     state.fronts = new Set(s.wars.flatMap((w) => w.fronts));
+    state.lairs = s.lairs ?? [];
+    state.rivalClaims = s.rivalClaims ?? [];
     syncClock(s);
     renderHudState(s);
     if (tickChanged) {
@@ -3437,6 +3692,8 @@ async function init() {
   state.speed = s.speed;
   state.wars = s.wars ?? [];
   state.fronts = new Set(state.wars.flatMap((w) => w.fronts));
+  state.lairs = s.lairs ?? [];
+  state.rivalClaims = s.rivalClaims ?? [];
   syncClock(s);
 
   // On reprend le fil des événements sans rejouer tout l'historique.

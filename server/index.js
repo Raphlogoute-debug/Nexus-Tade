@@ -133,9 +133,9 @@ function createSavesRouter() {
   });
 
   router.post('/new', (req, res) => {
-    const { name, scenario, seed } = req.body ?? {};
+    const { name, scenario, seed, settings } = req.body ?? {};
     try {
-      const created = newSave(SAVES_DIR, { name, scenario, seed });
+      const created = newSave(SAVES_DIR, { name, scenario, seed, settings });
       loadGame(created.file); // on bascule aussitôt sur la nouvelle partie
       res.json({ ok: true, ...created, active: created.file });
     } catch (e) {

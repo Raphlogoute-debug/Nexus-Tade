@@ -47,6 +47,11 @@ import {
   listSupplyContracts, contractsAt, acceptSupplyContract, deliverSupplyContract,
 } from '../economy/clients.js';
 import { signPact, listPacts, pactActive } from '../factions/pacts.js';
+import { listMegaprojects, deliverToProject } from '../economy/megaprojects.js';
+import {
+  listLairs, clearLair, clearLairCost, listSurveys, surveySystem, isSurveyed, colonyBoom,
+} from '../economy/frontier.js';
+import { setRouteEscort } from '../player/routes.js';
 import { techCatalog, researchTech, unlockedRecipes, hasTech } from '../player/tech.js';
 import {
   knownMarket, knowledgeSummary, intelCost, recordIntel, systemDistance,
@@ -236,17 +241,24 @@ export function createApiRouter(db, clock) {
 
     // À quai = au moins un vaisseau de VOTRE flotte est amarré ici.
     const docked = getFleet(db).some((s) => s.planet_id === id);
-    const quality = depositQuality(db, id);
+    // La géologie ne se lit que sur place ou après sondage (prospection).
+    const surveyed = isSurveyed(db, id);
+    const quality = (docked || surveyed) ? depositQuality(db, id) : null;
+    const rivalClaim = db.prepare(
+      `SELECT r.name, r.color FROM rival_concessions rc
+       JOIN rivals r ON r.id = rc.rival_id WHERE rc.planet_id = ?`).get(id);
     const payload = {
       ...planet,
       biomeLabel: BIOMES[planet.biome].label,
       tier: tierOf(planet.population),
       docked,
-      // Géologie locale (pour juger une concession avant de signer) et
-      // clients : offres et contrats d'approvisionnement de cette planète.
+      surveyed,
       depositQuality: quality,
-      depositLabel: depositLabel(quality),
+      depositLabel: quality === null ? null : depositLabel(quality),
+      rivalClaim: rivalClaim ?? null,
+      colonyBoom: Boolean(colonyBoom(db, id)),
       clients: contractsAt(db, id),
+      megaprojects: listMegaprojects(db).filter((mp) => mp.capital_planet_id === id),
     };
 
     // Les détails économiques (industries, stocks, flux) sont du
@@ -342,6 +354,12 @@ export function createApiRouter(db, clock) {
       speeds: clock.speeds,
       progress: clock.getProgress(),
       wars,
+      lairs: db.prepare(
+        'SELECT pl.system_id, pl.strength FROM pirate_lairs pl').all(),
+      rivalClaims: db.prepare(
+        `SELECT p.system_id, rc.planet_id, r.color, r.name FROM rival_concessions rc
+         JOIN planets p ON p.id = rc.planet_id
+         JOIN rivals r ON r.id = rc.rival_id`).all(),
     });
   });
 
@@ -696,7 +714,10 @@ export function createApiRouter(db, clock) {
       || !Number.isInteger(toPlanetId)) {
       return res.status(400).json({ error: 'paramètres invalides' });
     }
-    answer(res, createMission(db, { resourceId, quantity, fromPlanetId, toPlanetId }));
+    answer(res, createMission(db, {
+      resourceId, quantity, fromPlanetId, toPlanetId,
+      recurring: req.body?.recurring === true,
+    }));
   });
 
   router.delete('/missions/:id', (req, res) => {
@@ -734,6 +755,51 @@ export function createApiRouter(db, clock) {
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: 'id invalide' });
     answer(res, signPact(db, id));
+  });
+
+  // ── Phase 15 : observatoire, chantiers, frontière ───────────────
+  router.get('/observatory', (req, res) => {
+    res.json({
+      history: db.prepare('SELECT * FROM empire_history ORDER BY tick').all(),
+      routes: db.prepare('SELECT id, name, earned, always_escort FROM routes ORDER BY earned DESC').all(),
+      megaprojects: listMegaprojects(db),
+      lairs: listLairs(db).map((l) => ({ ...l, clearCost: clearLairCost(l.strength) })),
+    });
+  });
+
+  router.post('/megaprojects/:id/deliver', (req, res) => {
+    const id = parseId(req.params.id);
+    const shipId = parseShipId(req.body?.shipId);
+    const resourceId = req.body?.resourceId;
+    if (id === null || shipId === null || typeof resourceId !== 'string') {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, deliverToProject(db, id, resourceId, shipId));
+  });
+
+  router.get('/surveys', (req, res) => {
+    res.json(listSurveys(db));
+  });
+
+  router.post('/surveys', (req, res) => {
+    const systemId = req.body?.systemId;
+    const shipId = parseShipId(req.body?.shipId);
+    if (!Number.isInteger(systemId) || shipId === null) {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, surveySystem(db, systemId, shipId));
+  });
+
+  router.post('/lairs/:systemId/clear', (req, res) => {
+    const systemId = parseId(req.params.systemId);
+    if (systemId === null) return res.status(400).json({ error: 'id invalide' });
+    answer(res, clearLair(db, systemId));
+  });
+
+  router.post('/routes/:id/escort', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id invalide' });
+    answer(res, setRouteEscort(db, id, req.body?.escorted === true));
   });
 
   // ── Objectifs / fin de partie ───────────────────────────────────

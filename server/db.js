@@ -215,6 +215,64 @@ CREATE TABLE IF NOT EXISTS faction_pacts (
   signed_tick INTEGER NOT NULL
 );
 
+-- Phase 15 : sondages géologiques (la qualité des gisements se mémorise).
+CREATE TABLE IF NOT EXISTS deposit_surveys (
+  planet_id     INTEGER PRIMARY KEY,
+  surveyed_tick INTEGER NOT NULL
+);
+
+-- Grands chantiers : mégaprojets de faction, programme d'achat massif à
+-- prix garanti. delivered_player suit votre part (prestige du bâtisseur).
+CREATE TABLE IF NOT EXISTS megaprojects (
+  id           INTEGER PRIMARY KEY,
+  faction_id   INTEGER NOT NULL,
+  type_id      TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'active', -- active | done | abandoned
+  started_tick INTEGER NOT NULL,
+  expires_tick INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS megaproject_needs (
+  project_id       INTEGER NOT NULL,
+  resource_id      TEXT NOT NULL,
+  required         REAL NOT NULL,
+  delivered        REAL NOT NULL DEFAULT 0,
+  delivered_player REAL NOT NULL DEFAULT 0,
+  unit_price       REAL NOT NULL, -- fixé au lancement (base × premium)
+  PRIMARY KEY (project_id, resource_id)
+);
+
+-- Colonies naissantes : un petit monde en plein boom démographique.
+CREATE TABLE IF NOT EXISTS colonies (
+  planet_id    INTEGER PRIMARY KEY,
+  started_tick INTEGER NOT NULL,
+  boom_until   INTEGER NOT NULL
+);
+
+-- Repaires pirates : ils grossissent tant qu'on les laisse faire.
+CREATE TABLE IF NOT EXISTS pirate_lairs (
+  system_id    INTEGER PRIMARY KEY,
+  strength     INTEGER NOT NULL DEFAULT 1,
+  created_tick INTEGER NOT NULL
+);
+
+-- La course aux filons : concessions des maisons rivales.
+CREATE TABLE IF NOT EXISTS rival_concessions (
+  planet_id     INTEGER PRIMARY KEY,
+  rival_id      INTEGER NOT NULL,
+  resource_id   TEXT NOT NULL,
+  acquired_tick INTEGER NOT NULL
+);
+
+-- Observatoire : l'histoire de l'empire, échantillonnée.
+CREATE TABLE IF NOT EXISTS empire_history (
+  tick       INTEGER PRIMARY KEY,
+  revenue    REAL NOT NULL,
+  units_sold REAL NOT NULL,
+  credits    REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS player_tech (
   tech_id       TEXT PRIMARY KEY,
   acquired_tick INTEGER NOT NULL
@@ -431,6 +489,10 @@ const MIGRATIONS = [
   { table: 'player', column: 'total_units_sold', ddl: 'ALTER TABLE player ADD COLUMN total_units_sold REAL NOT NULL DEFAULT 0' },
   { table: 'player', column: 'total_units_bought', ddl: 'ALTER TABLE player ADD COLUMN total_units_bought REAL NOT NULL DEFAULT 0' },
   { table: 'player', column: 'total_revenue', ddl: 'ALTER TABLE player ADD COLUMN total_revenue REAL NOT NULL DEFAULT 0' },
+  // Phase 15 : missions récurrentes ; escorte systématique par route.
+  { table: 'missions', column: 'recurring', ddl: 'ALTER TABLE missions ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0' },
+  { table: 'missions', column: 'quantity0', ddl: 'ALTER TABLE missions ADD COLUMN quantity0 REAL NOT NULL DEFAULT 0' },
+  { table: 'routes', column: 'always_escort', ddl: 'ALTER TABLE routes ADD COLUMN always_escort INTEGER NOT NULL DEFAULT 0' },
 ];
 
 export function createDb(path) {
@@ -508,6 +570,8 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
+      'empire_history', 'rival_concessions', 'pirate_lairs', 'colonies',
+      'megaproject_needs', 'megaprojects', 'deposit_surveys',
       'faction_pacts', 'client_loyalty', 'supply_contracts', 'ship_equipment',
       'missions', 'networth_history', 'rival_holdings', 'rivals',
       'objectives', 'post_orders', 'post_storage', 'trading_posts',

@@ -34,6 +34,9 @@ import { depositQuality, depositLabel } from '../server/player/concession.js';
 import { equipShip } from '../server/player/shipyard.js';
 import { tickClients, acceptSupplyContract, deliverSupplyContract, loyaltyOf } from '../server/economy/clients.js';
 import { signPact, pactActive, tickPacts } from '../server/factions/pacts.js';
+import { tickMegaprojects, listMegaprojects, deliverToProject } from '../server/economy/megaprojects.js';
+import { tickColonies, tickLairs, listLairs, clearLair, lairDanger, surveySystem, listSurveys } from '../server/economy/frontier.js';
+import { systemDanger } from '../server/factions/piracy.js';
 import { adjustStanding } from '../server/factions/standing.js';
 import { intelCost as intelCost13 } from '../server/player/knowledge.js';
 import { getHouse, buildHQ, upgradeHQ, hqBonuses, renownOf } from '../server/player/house.js';
@@ -1480,6 +1483,129 @@ check(Boolean(millionObj) && millionObj.progress[0].goal === 1000000
   && millionObj.progress[0].value > 0,
   `objectif « ${millionObj?.name} » suivi : ${fmt(millionObj?.progress[0].value)}/1 000 000 unités`);
 
+// ── Phase 15 : l'empire contesté ─────────────────────────────────
+
+console.log('\n■ Phase 15 — Grands chantiers\n');
+
+db.prepare('UPDATE player SET credits = 5000000 WHERE id = 1').run();
+// Lancement forcé : on insère un chantier compact et on le fournit.
+const mpFaction = allFactions[0];
+const mpId = db.prepare(
+  `INSERT INTO megaprojects (faction_id, type_id, name, started_tick, expires_tick)
+   VALUES (?, 'jump_gate', 'Porte de saut', ?, ?)`
+).run(mpFaction.id, getCurrentTick(db), getCurrentTick(db) + 500).lastInsertRowid;
+db.prepare(
+  `INSERT INTO megaproject_needs (project_id, resource_id, required, unit_price)
+   VALUES (?, 'steel', 300, 20)`).run(mpId);
+const mpList = listMegaprojects(db);
+check(mpList.some((m) => m.id === mpId && m.needs[0].unit_price === 20),
+  `chantier listé : ${mpList[0].name} — 300 ACIER à prix garanti 20 cr`);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(mpFaction.capital_planet_id, flagship.id);
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'steel', 350, 5)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 350`).run(flagship.id);
+const mpCredits = getPlayer(db).credits;
+const mpDel = deliverToProject(db, mpId, 'steel', flagship.id);
+check(mpDel.ok && mpDel.delivered === 300 && Math.abs(getPlayer(db).credits - mpCredits - 6000) < 1,
+  `livraison au chantier : 300 acier → +6 000 cr (prix garanti, pas de glissement)`);
+const popBefore15 = db.prepare('SELECT population FROM planets WHERE id = ?').get(mpFaction.capital_planet_id).population;
+tickMegaprojects(db, getCurrentTick(db) + 1);
+const mpDone = db.prepare('SELECT status FROM megaprojects WHERE id = ?').get(mpId).status;
+const popAfter15 = db.prepare('SELECT population FROM planets WHERE id = ?').get(mpFaction.capital_planet_id).population;
+check(mpDone === 'done' && popAfter15 > popBefore15,
+  `chantier achevé : la capitale grandit (${popBefore15.toFixed(0)} → ${popAfter15.toFixed(0)} M hab.)`);
+
+console.log('\n■ Phase 15 — Colonies et repaires\n');
+
+// Colonie forcée : boom démographique mesurable + remise pionnier.
+const colPlanet = db.prepare(
+  `SELECT p.id, p.population FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id IS NULL AND p.population < 5
+     AND p.id NOT IN (SELECT planet_id FROM concessions)
+     AND p.id NOT IN (SELECT planet_id FROM rival_concessions)
+     AND p.id NOT IN (SELECT planet_id FROM trading_posts) LIMIT 1`).get();
+db.prepare('INSERT INTO colonies (planet_id, started_tick, boom_until) VALUES (?, ?, ?)')
+  .run(colPlanet.id, getCurrentTick(db), getCurrentTick(db) + 300);
+tickColonies(db, getCurrentTick(db));
+const colPopAfter = db.prepare('SELECT population FROM planets WHERE id = ?').get(colPlanet.id).population;
+check(colPopAfter > colPlanet.population, `colonie en boom : la population grimpe à chaque tick`);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(colPlanet.id, flagship.id);
+const colPost = buyPost(db, flagship.id);
+check(colPost.ok && colPost.price < CONFIG.PLAYER.POSTS.BASE_PRICE * 2 ** 1,
+  colPost.ok && `pionnier : comptoir à prix réduit sur la colonie (${fmt(colPost.price)} cr)`);
+
+// Repaire pirate : danger qui grimpe, mercenaires qui rasent.
+const lairSys = db.prepare(
+  `SELECT id FROM systems WHERE faction_id IS NULL
+   AND id NOT IN (SELECT system_id FROM pirate_lairs) LIMIT 1`).get();
+const dangerBefore = systemDanger(db, lairSys.id);
+db.prepare('INSERT INTO pirate_lairs (system_id, strength, created_tick) VALUES (?, 3, ?)')
+  .run(lairSys.id, getCurrentTick(db));
+const dangerAfter = systemDanger(db, lairSys.id);
+check(dangerAfter > dangerBefore,
+  `repaire (force 3) : danger du système ${(dangerBefore * 100).toFixed(1)} % → ${(dangerAfter * 100).toFixed(1)} %/tick`);
+const cleared = clearLair(db, lairSys.id);
+check(cleared.ok && listLairs(db).every((l) => l.system_id !== lairSys.id)
+  && Math.abs(systemDanger(db, lairSys.id) - dangerBefore) < 0.001,
+  cleared.ok && `mercenaires (−${fmt(cleared.cost)} cr) : repaire rasé, danger retombé`);
+
+console.log('\n■ Phase 15 — Prospection, récurrence, réglages\n');
+
+// Sondage : géologie mémorisée.
+const surveyShipPlanet = db.prepare('SELECT id, system_id FROM planets WHERE id = ?')
+  .get(getShip(db, flagship.id).planet_id);
+const survey = surveySystem(db, surveyShipPlanet.system_id, flagship.id);
+check(survey.ok && listSurveys(db).length >= survey.surveyed,
+  survey.ok && `sondage : ${survey.surveyed} planètes relevées, meilleur filon ×${survey.bestQuality}`);
+
+// Mission récurrente : elle se réarme après la rotation.
+const recHome = listConcessions(db)[0];
+db.prepare("UPDATE ships SET planet_id = ?, mode = 'manual' WHERE id = ?")
+  .run(recHome.planet_id, flagship.id);
+db.prepare('DELETE FROM ship_cargo WHERE ship_id = ?').run(flagship.id);
+db.prepare(
+  `INSERT INTO facility_storage (concession_id, resource_id, quantity) VALUES (?, ?, 500)
+   ON CONFLICT(concession_id, resource_id) DO UPDATE SET quantity = 500`
+).run(recHome.id, recHome.resource_id);
+const recDest = db.prepare(
+  `SELECT p.id FROM planets p WHERE p.population < 50 AND p.id != ? LIMIT 1`
+).get(recHome.planet_id);
+const recMission = createMission(db, {
+  resourceId: recHome.resource_id, quantity: 100,
+  fromPlanetId: recHome.planet_id, toPlanetId: recDest.id, recurring: true,
+});
+let recTicks = 0;
+let rearmed = false;
+while (recTicks < 60 && !rearmed) {
+  runTick(db);
+  recTicks++;
+  const m = db.prepare('SELECT * FROM missions WHERE id = ?').get(recMission.id);
+  if (m && db.prepare(
+    "SELECT COUNT(*) AS n FROM world_events WHERE type = 'mission' AND message LIKE '%♻%'").get().n > 0) {
+    rearmed = true;
+  }
+}
+check(recMission.ok && rearmed
+  && Boolean(db.prepare('SELECT 1 FROM missions WHERE id = ?').get(recMission.id)),
+  `mission récurrente : rotation accomplie et réarmée toute seule (${recTicks} ticks)`);
+db.prepare('DELETE FROM missions WHERE id = ?').run(recMission.id);
+db.prepare("UPDATE ships SET mode = 'manual' WHERE id = ?").run(flagship.id);
+
+// Réglages : un univers compact + pirates féroces + zéro rival.
+import('node:fs').then(() => {}); // no-op
+const dbSet = createDb(':memory:');
+generateUniverse(dbSet, SEED, { minSystems: 40, maxSystems: 60 });
+const sysCount = dbSet.prepare('SELECT COUNT(*) AS n FROM systems').get().n;
+check(sysCount >= 40 && sysCount <= 60, `univers compact : ${sysCount} systèmes (40-60)`);
+generateFactions(dbSet);
+const anySys = dbSet.prepare('SELECT id FROM systems LIMIT 1').get();
+dbSet.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('piracy_mult', '1')").run();
+const dangerBase15 = systemDanger(dbSet, anySys.id);
+dbSet.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('piracy_mult', '1.5')").run();
+check(Math.abs(systemDanger(dbSet, anySys.id) - dangerBase15 * 1.5) < 0.001,
+  'pirates féroces : le danger est multiplié par 1,5');
+dbSet.close();
+
 console.log('\n■ Phase 11 — Scénarios de départ\n');
 
 // Un scénario alternatif applique bien ses paramètres (sur une DB neuve).
@@ -1511,5 +1637,6 @@ console.log(failures
   : '\n✓ Phases 1 à 14 vérifiées : économie, guerres, flotte, industrie, routes, '
     + 'investissements, prêts, contrebande, comptoirs, objectifs, maison/QG, rivaux, '
     + 'scénarios, piraterie/escortes, revenus de guerre, missions, gisements, '
-    + 'équipement, clients, accords et échelle OK\n');
+    + 'équipement, clients, accords, échelle, chantiers, colonies, repaires, '
+    + 'prospection et réglages OK\n');
 process.exit(failures ? 1 : 0);

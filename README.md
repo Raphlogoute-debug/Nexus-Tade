@@ -4,7 +4,7 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 14 terminée.** Le jeu complet du marchand-puissance :
+**État actuel : Phase 15 terminée.** Le jeu complet du marchand-puissance :
 univers procédural vivant (royaumes, guerres résolues par l'économie,
 marchands PNJ, **maisons rivales** qui arbitrent et accaparent), commerce
 avec impact prix partout, industrie (concessions, ateliers, parts,
@@ -31,7 +31,7 @@ création (nom + scénario + seed), chargement à chaud, suppression. Une
 ancienne `nexus-trade.db` à la racine est migrée automatiquement.
 
 ```bash
-npm run verify     # vérification bout en bout sans serveur (Phases 1 à 14)
+npm run verify     # vérification bout en bout sans serveur (Phases 1 à 15)
 npm run bench      # banc d'essai : coût d'un tick sur disque, partie chargée
 ```
 
@@ -377,6 +377,38 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   « Géant régional » (10 systèmes + 40 partenaires), « Seigneur des
   volumes » (100 M d'unités) — l'arche du petit transporteur au géant
 
+**Phase 15 — l'empire contesté** (`server/economy/megaprojects.js`,
+`frontier.js`, course aux filons, observatoire, réglages)
+- **Grands chantiers** : une faction lance une Porte de saut, une
+  Station-monde, une Arche — programme d'achat MASSIF à prix garanti à
+  sa capitale (dizaines de milliers d'unités par poste, premium ×1,25
+  fixé au lancement). Le chantier s'autoalimente lentement ; le plus
+  gros fournisseur (≥ 25 %) entre dans la légende (+600 prestige), et
+  la capitale grandit à l'achèvement
+- **Colonies naissantes** : un petit monde de la Frange entre en boom
+  (population ×1,2 %/tick pendant 400 ticks) — demande qui explose,
+  concessions et comptoirs à MOITIÉ PRIX pour les pionniers
+- **La course aux filons** : les maisons rivales achètent des
+  concessions sur les gisements riches (≥ ×1,3) — revendiqués sur la
+  carte à leurs couleurs, le filon devient inaccessible. Annoncé au
+  journal : si vous traînez, c'est perdu
+- **Prospection** : sonder les gisements d'un système (vaisseau sur
+  place, ⛏ depuis la vue système) — la géologie se mémorise et
+  s'affiche en mode carte « filons » ; la fiche planète ne révèle plus
+  la qualité qu'une fois sur place ou sondée
+- **Missions récurrentes ♻** : la mission de vente qui se réarme toute
+  seule à chaque rotation — l'ordre permanent de l'empire
+- **Observatoire (ÉCO)** : courbes de l'empire (CA/tick, unités/tick,
+  trésorerie), routes classées par recettes avec bascule « couloir
+  sécurisé » (escorte sur chaque trajet), grands chantiers à fournir,
+  repaires à raser
+- **Repaires pirates** : ils s'installent dans la Frange et grossissent
+  (le danger des couloirs voisins grimpe) — payez des mercenaires pour
+  les raser avant qu'ils prospèrent
+- **Réglages de partie** : à la création — rivaux (0/2/4/7), pirates
+  (rares/normaux/féroces), univers (compact/normal/vaste 100-150
+  systèmes)
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - En-tête : blason + nom + rang de votre maison ; bouton PARTIES (overlay
   de sauvegardes + sélecteur de scénario), panneau MAISON (identité, QG,
@@ -436,6 +468,11 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `POST /api/ships/:id/equip` | installer un module (soute, réservoir, moteurs) |
 | `POST /api/clients/:id/accept` · `/clients/:id/deliver` | contrats d'approvisionnement civils (prix fixé, fidélité) |
 | `POST /api/factions/:id/pact` | accord commercial (douanes, relevés, contrats) |
+| `GET /api/observatory` | courbes de l'empire, routes par recettes, chantiers, repaires |
+| `POST /api/megaprojects/:id/deliver` | livrer un grand chantier (prix garanti) |
+| `GET /api/surveys` · `POST /api/surveys` | sondages géologiques (mode carte « filons ») |
+| `POST /api/lairs/:systemId/clear` | raser un repaire pirate (mercenaires) |
+| `POST /api/routes/:id/escort` | couloir sécurisé : escorte sur chaque trajet |
 | `GET /api/saves` · `POST /api/saves/new` · `/saves/load` · `DELETE /api/saves/:file` | gestion des parties |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |

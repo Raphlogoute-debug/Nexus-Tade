@@ -87,12 +87,15 @@ h1 span {
 #hud {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 7px 18px;
+  flex-wrap: wrap; /* écrans étroits : la barre passe sur deux lignes */
+  gap: 4px 14px;
+  padding: 6px 18px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-2);
   font-size: 12px;
 }
+
+html, body { overflow-x: hidden; }
 
 .hud-item { color: var(--dim); letter-spacing: 1px; white-space: nowrap; }
 .hud-item strong { color: var(--text); font-weight: 600; }

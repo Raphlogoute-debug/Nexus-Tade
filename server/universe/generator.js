@@ -119,7 +119,7 @@ function round2(n) {
 
 // ── Génération complète ──────────────────────────────────────────
 
-export function generateUniverse(db, seed) {
+export function generateUniverse(db, seed, opts = {}) {
   const rng = createRng(seed);
 
   const insertSystem = db.prepare('INSERT INTO systems (name, x, y) VALUES (?, ?, ?)');
@@ -142,7 +142,8 @@ export function generateUniverse(db, seed) {
   let planetCount = 0;
 
   db.transaction(() => {
-    const systemCount = rng.int(U.MIN_SYSTEMS, U.MAX_SYSTEMS);
+    const systemCount = rng.int(
+      opts.minSystems ?? U.MIN_SYSTEMS, opts.maxSystems ?? U.MAX_SYSTEMS);
     const positions = placeSystems(rng, systemCount);
     const usedNames = new Set();
     const systemIds = [];
