@@ -178,7 +178,7 @@ export function createApiRouter(db, clock) {
       const net = divs - upkeep;
       if (net < 0 && player.credits < -net * 60) {
         alerts.push({ level: 'warn',
-          message: `Trésorerie à sec dans ~${Math.floor(player.credits / -net)} ticks (${Math.round(net)}/tick)` });
+          message: `Trésorerie à sec dans ~${Math.floor(player.credits / -net)} jours (${Math.round(net)}/jour)` });
       }
     }
 

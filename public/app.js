@@ -26,6 +26,23 @@ const fmtNum = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
 const fmtInt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 const fmtPrice = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// ── Calendrier galactique : 1 tick = 1 jour, an 3000 au tick 0 ─────
+// Les trajets se comptent en jours, les guerres en mois, les chantiers
+// en années — le temps devient lisible.
+const EPOCH_MS = Date.UTC(3000, 0, 1);
+const fmtDateFull = new Intl.DateTimeFormat('fr-FR',
+  { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+const fmtDateShort = new Intl.DateTimeFormat('fr-FR',
+  { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+function dateOf(tick) {
+  return fmtDateFull.format(new Date(EPOCH_MS + (tick ?? 0) * 86400000));
+}
+
+function dateShort(tick) {
+  return fmtDateShort.format(new Date(EPOCH_MS + (tick ?? 0) * 86400000));
+}
+
 // Grands nombres : 12 345 → « 12,3 k », 4 567 890 → « 4,57 M »…
 function fmtQty(n) {
   const abs = Math.abs(n);
@@ -275,7 +292,7 @@ function drawFloaters() {
 
 function log(message) {
   const li = document.createElement('li');
-  li.innerHTML = `<span class="tick-stamp">t${state.tick ?? 0}</span><strong>${message}</strong>`;
+  li.innerHTML = `<span class="tick-stamp">${dateShort(state.tick)}</span><strong>${message}</strong>`;
   const list = $('#journal-list');
   list.prepend(li);
   while (list.children.length > 60) list.lastChild.remove();
@@ -905,7 +922,7 @@ function renderFleetBar() {
     chip.className = `fleet-chip ${ship.id === selectedShip()?.id ? 'selected' : ''}`;
     const where = ship.planet_id !== null
       ? state.planetIndex.get(ship.planet_id).planet.name
-      : `→ ${state.planetIndex.get(ship.dest_planet_id).planet.name} (t${ship.arrival_tick})${ship.escorted ? ' 🛡' : ''}`;
+      : `→ ${state.planetIndex.get(ship.dest_planet_id).planet.name} (arr. ${dateShort(ship.arrival_tick)})${ship.escorted ? ' 🛡' : ''}`;
     chip.innerHTML = `
       <span class="ship-name">${ship.false_flag ? '⚑ ' : ''}${ship.name}</span>
       <span>${ship.classLabel}</span>
@@ -1012,7 +1029,7 @@ canvas.addEventListener('mousemove', (e) => {
   if (sys) {
     const age = state.knowledge.get(sys.id);
     const info = age === undefined ? 'marchés inconnus'
-      : age === 0 ? 'données fraîches' : `données : il y a ${age} ticks`;
+      : age === 0 ? 'données fraîches' : `données : il y a ${age} j`;
     const danger = state.fronts.has(sys.id)
       ? '<br><span style="color:#f04545">⚔ FRONT DE GUERRE — risque pirate extrême</span>'
       : sys.faction_id === null
@@ -1127,7 +1144,7 @@ async function renderSystemPanel(sys) {
   panel.innerHTML = `
     <h2 class="panel-title">${sys.name}</h2>
     <p class="panel-sub">Système — position (${Math.round(sys.x)}, ${Math.round(sys.y)})
-      — ${age === undefined ? 'marchés inconnus' : `données : il y a ${age} ticks`}</p>
+      — ${age === undefined ? 'marchés inconnus' : `données : il y a ${age} j`}</p>
     <div style="margin:4px 0 8px">${factionChip(sys.faction_id)}</div>
     <div class="section-label">Planètes (${sys.planets.length})</div>
     <div id="system-planets"></div>
@@ -1342,7 +1359,7 @@ function renderDockedPanel(planet, market) {
       <div class="info-block">
         <div class="row"><span>Gisement</span>
           <span class="${qCls}">${c.qualityLabel} ×${fmtNum.format(c.quality)}</span></div>
-        <div class="row"><span>Extraction</span><span>+${fmtNum.format(c.rate)}/tick</span></div>
+        <div class="row"><span>Extraction</span><span>+${fmtNum.format(c.rate)}/j</span></div>
         <div class="row"><span>Entrepôt</span><span>${fmtQty(c.used)} / ${fmtQty(c.cap)} (${pct} %)</span></div>
         <div class="gauge"><div style="width:${pct}%"></div></div>
     `;
@@ -1380,7 +1397,7 @@ function renderDockedPanel(planet, market) {
         .map(([rid, q]) => `${q} ${state.player.workshopCatalog.find((x) => x.recipe_id === rid)?.name ?? rid}`)
         .join(' + ');
       html += `<div class="industry">${w.name}
-        <span class="io">— ${inputs} → ${w.output} (×${w.rate}/tick)</span></div>`;
+        <span class="io">— ${inputs} → ${w.output} (×${w.rate}/j)</span></div>`;
     }
     if (shipHere) {
       const installed = new Set(c.workshops.map((w) => w.recipe_id));
@@ -1424,7 +1441,7 @@ function renderDockedPanel(planet, market) {
   if (post) {
     const pct = Math.round((post.used / post.cap) * 100);
     html += `
-      <div class="section-label">Comptoir commercial (niv. ${post.level}) — débit ${fmtQty(post.flow)}/tick</div>
+      <div class="section-label">Comptoir commercial (niv. ${post.level}) — débit ${fmtQty(post.flow)}/j</div>
       <div class="info-block">
         <div class="row"><span>Entrepôt</span><span>${fmtQty(post.used)} / ${fmtQty(post.cap)} (${pct} %)</span></div>
         <div class="gauge"><div style="width:${pct}%"></div></div>
@@ -1458,7 +1475,7 @@ function renderDockedPanel(planet, market) {
         : '<span class="io">en veille</span>';
       html += `<div class="industry">${o.side === 'buy' ? 'ACHAT' : 'VENTE'} ${o.name}
         <span class="io">— ${o.side === 'buy' ? 'tant que ≤' : 'tant que ≥'} ${fmtPrice.format(o.limit_price)} cr
-        · ${fmtQty(o.flow)}/tick</span> · ${live}
+        · ${fmtQty(o.flow)}/j</span> · ${live}
         ${shipHere ? `<button class="action-btn post-del-order" data-pid="${post.id}" data-oid="${o.id}">✕</button>` : ''}</div>`;
     }
     if (shipHere) {
@@ -1474,7 +1491,7 @@ function renderDockedPanel(planet, market) {
         </span></div>
         <div class="row" style="margin-top:5px"><span>
           <input type="number" id="post-order-limit" placeholder="limite cr" min="0.1" step="0.1" style="width:110px;${inputStyle}">
-          <input type="number" id="post-order-flow" placeholder="u/tick" min="1" max="${post.flow}" value="${post.flow}" style="width:78px;${inputStyle}">
+          <input type="number" id="post-order-flow" placeholder="u/jour" min="1" max="${post.flow}" value="${post.flow}" style="width:78px;${inputStyle}">
           <button class="action-btn" id="btn-post-order">Poser l'ordre</button>
         </span></div>
         <div style="color:var(--dim);font-size:11px;margin-top:5px">Un ordre d'achat draine le
@@ -1513,8 +1530,8 @@ function renderDockedPanel(planet, market) {
         || state.player.ships.length >= state.player.maxFleet;
       html += `<button class="action-btn buy-ship" data-class="${classId}" ${disabled ? 'disabled' : ''}
         title="${tierLocked ? `chantier de tier ${cls.minTier} requis — les géants sortent des grands mondes`
-          : `soute ${fmtQty(cls.cargo)} · vitesse ${cls.speed} · réservoir ${fmtQty(cls.fuel)} · entretien ${cls.upkeep} cr/tick`}">
-        ${cls.label} (${fmtQty(cls.price)} cr · ${cls.upkeep}/tick)${tierLocked ? ' 🔒T3' : ''}</button>`;
+          : `soute ${fmtQty(cls.cargo)} · vitesse ${cls.speed} · réservoir ${fmtQty(cls.fuel)} · entretien ${cls.upkeep} cr/j`}">
+        ${cls.label} (${fmtQty(cls.price)} cr · ${cls.upkeep}/j)${tierLocked ? ' 🔒T3' : ''}</button>`;
     }
     html += `</div>`;
   }
@@ -1528,7 +1545,7 @@ function renderDockedPanel(planet, market) {
     const stakeCost = Math.round(ind.valuation * 0.1);
     const canBuyMore = ind.playerShare < ind.maxShare - 1e-9;
     html += `<div class="industry">${ind.name}
-      <span class="io">— ${inputs} → ${ind.output} (×${fmtNum.format(ind.rate)}/tick)</span>
+      <span class="io">— ${inputs} → ${ind.output} (×${fmtNum.format(ind.rate)}/j)</span>
       ${ind.playerShare > 0 ? `<span class="badge live">${Math.round(ind.playerShare * 100)} %</span>` : ''}
       ${shipHere && canBuyMore
         ? `<button class="action-btn invest-btn" data-recipe="${ind.recipe_id}"
@@ -1547,7 +1564,7 @@ function renderDockedPanel(planet, market) {
   }
 
   html += `
-    <div class="section-label">Marché en direct — tick ${market.tick}</div>
+    <div class="section-label">Marché en direct</div>
     <table>
       <tr><th>Ressource</th><th>Stock</th><th>Soute</th><th>Prix</th></tr>
   `;
@@ -1645,7 +1662,7 @@ function renderDockedPanel(planet, market) {
 
   $('#btn-upgrade')?.addEventListener('click', async (e) => {
     const r = await apiPost('/concession/upgrade', { concessionId: Number(e.target.dataset.cid) });
-    if (r.ok) log(`Concession niveau ${r.level} — extraction ${fmtNum.format(r.rate)}/tick (−${fmtInt.format(r.cost)} cr)`);
+    if (r.ok) log(`Concession niveau ${r.level} — extraction ${fmtNum.format(r.rate)}/j (−${fmtInt.format(r.cost)} cr)`);
     else log(`Amélioration impossible : ${r.error}`);
     await refreshPlayerAndKnowledge();
     refreshPlanetPanel();
@@ -1672,7 +1689,7 @@ function renderDockedPanel(planet, market) {
   }
   $('#btn-found')?.addEventListener('click', async () => {
     const r = await apiPost('/industry/found', { recipeId: $('#found-recipe').value, shipId });
-    if (r.ok) log(`Industrie fondée : ${r.name} sur ${r.planetName} (×${fmtNum.format(r.rate)}/tick, 49 % fondateur, −${fmtQty(r.cost)} cr)`);
+    if (r.ok) log(`Industrie fondée : ${r.name} sur ${r.planetName} (×${fmtNum.format(r.rate)}/j, 49 % fondateur, −${fmtQty(r.cost)} cr)`);
     else log(`Fondation impossible : ${r.error}`);
     await refreshPlayerAndKnowledge();
     refreshPlanetPanelForce();
@@ -1733,7 +1750,7 @@ function renderDockedPanel(planet, market) {
 
   $('#btn-post-upgrade')?.addEventListener('click', async (e) => {
     const r = await apiPost(`/posts/${e.target.dataset.pid}/upgrade`);
-    if (r.ok) log(`Comptoir niveau ${r.level} — entrepôt ${fmtQty(r.cap)}, débit ${fmtQty(r.flow)}/tick (−${fmtQty(r.cost)} cr)`);
+    if (r.ok) log(`Comptoir niveau ${r.level} — entrepôt ${fmtQty(r.cap)}, débit ${fmtQty(r.flow)}/j (−${fmtQty(r.cost)} cr)`);
     else log(`Agrandissement impossible : ${r.error}`);
     await refreshPlayerAndKnowledge();
     refreshPlanetPanelForce();
@@ -1768,7 +1785,7 @@ function renderDockedPanel(planet, market) {
     });
     if (r.ok) {
       log(`Ordre ${r.replaced ? 'remplacé' : 'posé'} : ${r.side === 'buy' ? 'ACHAT' : 'VENTE'} ${r.name} `
-        + `${r.side === 'buy' ? '≤' : '≥'} ${fmtPrice.format(r.limitPrice)} cr (${fmtQty(r.flow)}/tick)`);
+        + `${r.side === 'buy' ? '≤' : '≥'} ${fmtPrice.format(r.limitPrice)} cr (${fmtQty(r.flow)}/j)`);
     } else {
       log(`Ordre refusé : ${r.error}`);
     }
@@ -1866,7 +1883,7 @@ async function fillBestOutlet(planet, market) {
       <span class="goto-link" id="outlet-link">${best.planetName}</span>
       — ${fmtPrice.format(best.price)} cr (ici ${fmtPrice.format(localPrice)})
       ≈ <span class="price-low">+${fmtQty(gain)} cr</span>
-      ${best.ageTicks > 0 ? `<span class="badge age">vu il y a ${best.ageTicks} t</span>` : '<span class="badge live">live</span>'}
+      ${best.ageTicks > 0 ? `<span class="badge age">vu il y a ${best.ageTicks} j</span>` : '<span class="badge live">live</span>'}
       <div style="margin-top:6px">
         <button class="action-btn mini" id="outlet-go">y aller</button>
         ${isMyConcession ? `<button class="action-btn mini" id="outlet-shuttle"
@@ -1915,7 +1932,7 @@ function missionSectionHtml(planet, c) {
     <div class="info-block outlet" id="mission-block">`;
   if (c.storage.length === 0 && missions.length === 0) {
     html += `<div style="color:var(--dim)">L'entrepôt se remplit tout seul
-      (extraction ${fmtNum.format(c.rate)}/tick) — revenez quand il y a de quoi vendre.</div>`;
+      (extraction ${fmtNum.format(c.rate)}/j) — revenez quand il y a de quoi vendre.</div>`;
   }
   if (c.storage.length > 0) {
     const first = c.storage[0];
@@ -1978,7 +1995,7 @@ async function bindMissionSection(planet) {
       .slice(0, 10);
     destSel.innerHTML = markets.length
       ? markets.map((m) => `<option value="${m.planetId}">${m.planetName} — ${fmtPrice.format(m.price)} cr${
-          m.ageTicks > 0 ? ` · vu ${m.ageTicks}t` : ''}</option>`).join('')
+          m.ageTicks > 0 ? ` · vu ${m.ageTicks} j` : ''}</option>`).join('')
       : '<option value="">aucun marché connu — voyagez ou achetez des relevés</option>';
   };
   resSel.addEventListener('change', () => {
@@ -2024,7 +2041,7 @@ function clientsSectionHtml(planet) {
       html += `<div class="info-block">
         <div class="row"><span>📦 Demande : ${fmtQty(sc.quantity)} ${sc.resourceName}</span>
           <span class="price-low">${fmtPrice.format(sc.unit_price)} cr/u fixé</span></div>
-        <div class="row"><span style="color:var(--dim)">offre valable jusqu'au tick ${sc.expires_tick}${
+        <div class="row"><span style="color:var(--dim)">offre valable jusqu'au ${dateOf(sc.expires_tick)}${
           sc.loyalty > 0 ? ` · client fidèle (niv. ${sc.loyalty})` : ''}</span>
           <span><button class="action-btn primary accept-client" data-id="${sc.id}">Signer</button></span></div>
         <div style="color:var(--dim);font-size:11px;margin-top:4px">Prix garanti à la signature —
@@ -2038,7 +2055,7 @@ function clientsSectionHtml(planet) {
         <div class="row"><span>📦 Contrat signé : ${sc.resourceName}</span>
           <span>${fmtQty(sc.remaining)}/${fmtQty(sc.quantity)} restants</span></div>
         <div class="row"><span style="color:var(--dim)">à ${fmtPrice.format(sc.unit_price)} cr/u ·
-          avant le tick ${sc.expires_tick}</span>
+          avant le ${dateOf(sc.expires_tick)}</span>
           <span><button class="action-btn deliver-client" data-id="${sc.id}"
             ${here && held > 0 ? '' : 'disabled'}
             title="${here ? (held > 0 ? '' : 'rien de tel en soute') : 'amarrez un vaisseau ici'}">
@@ -2055,7 +2072,7 @@ function bindClientsSection() {
       const r = await apiPost(`/clients/${btn.dataset.id}/accept`);
       if (r.ok) {
         toast(`Contrat signé : ${fmtQty(r.quantity)} ${r.resourceName} pour ${r.planetName}`, 'good');
-        log(`Client : ${r.planetName} — ${fmtQty(r.quantity)} ${r.resourceName} à ${fmtPrice.format(r.unitPrice)} cr/u (avant t${r.deadline})`);
+        log(`Client : ${r.planetName} — ${fmtQty(r.quantity)} ${r.resourceName} à ${fmtPrice.format(r.unitPrice)} cr/u (avant le ${dateOf(r.deadline)})`);
       } else {
         log(`Signature impossible : ${r.error}`);
       }
@@ -2161,7 +2178,7 @@ async function renderRemotePanel(planet, market) {
   } else {
     html += `
       <div class="section-label">Dernières données connues
-        <span class="badge age">il y a ${market.ageTicks} ticks</span></div>
+        <span class="badge age">il y a ${market.ageTicks} j</span></div>
       <table>
         <tr><th>Ressource</th><th>Stock</th><th>Prix vu</th></tr>
     `;
@@ -2206,7 +2223,7 @@ async function renderRemotePanel(planet, market) {
       : `<div class="escort-opt dim" title="Espace policé — une attaque reste improbable">trajet en espace sûr</div>`;
     slot.innerHTML = `
       <button class="action-btn primary" id="btn-travel">
-        ${ship.name} : voyager — ${preview.ticks} tick${preview.ticks > 1 ? 's' : ''} ·
+        ${ship.name} : voyager — ${preview.ticks} jour${preview.ticks > 1 ? 's' : ''} ·
         ${preview.fuelCost > 0 ? `${fmtInt.format(preview.fuelCost)} carburant` : 'saut local'}
       </button>
       ${riskLine}
@@ -2215,7 +2232,7 @@ async function renderRemotePanel(planet, market) {
       const escort = Boolean($('#travel-escort')?.checked);
       const r = await apiPost('/travel', { planetId: planet.id, shipId: ship.id, escort });
       if (r.ok) {
-        log(`En route vers ${planet.name} — arrivée au tick ${r.arrivalTick}`
+        log(`En route vers ${planet.name} — arrivée le ${dateOf(r.arrivalTick)}`
           + (r.escorted ? ` · sous escorte (−${fmtInt.format(r.escortCost)} cr)` : ''));
         await refreshPlayerAndKnowledge();
         renderHudPlayer();
@@ -2298,9 +2315,9 @@ async function renderMarketsPanel() {
     // périmée (rouge) — un prix vieux de 500 ticks ne vaut plus grand-chose.
     const ageCell = (t) => {
       if (t === 0) return '<td class="age-live">live</td>';
-      if (t <= 30) return `<td>${t} t</td>`;
-      if (t <= 120) return `<td class="age-mid" title="donnée datée">${t} t</td>`;
-      return `<td class="age-old" title="donnée périmée — à revérifier">${t} t</td>`;
+      if (t <= 30) return `<td>${t} j</td>`;
+      if (t <= 120) return `<td class="age-mid" title="donnée datée">${t} j</td>`;
+      return `<td class="age-old" title="donnée périmée — à revérifier">${t} j</td>`;
     };
     for (const m of sorted) {
       const cls = m.price === cheapest ? 'buy' : m.price === dearest ? 'sell' : '';
@@ -2363,7 +2380,7 @@ async function renderObjectivesPanel() {
     html += `<div class="info-block ${o.done ? 'objective-done' : ''} ${o.victory ? 'objective-victory' : ''}">
       <div class="row"><span><strong>${o.victory ? '★ ' : ''}${o.name}</strong></span>
         <span>${o.done
-          ? `<span class="badge live">ATTEINT · t${o.completedTick}</span>`
+          ? `<span class="badge live">ATTEINT · ${dateShort(o.completedTick)}</span>`
           : `<span class="badge">+${fmtInt.format(o.reward)} prestige</span>`}</span></div>
       <div style="color:var(--dim);margin-top:3px">${o.desc}</div>`;
     if (!o.done) {
@@ -2415,7 +2432,7 @@ async function renderWarsPanel() {
 
   for (const war of data.wars) {
     html += `<div class="section-label">⚔ ${war.attacker.name} contre ${war.defender.name}
-      — depuis t${war.since}</div>`;
+      — depuis le ${dateShort(war.since)}</div>`;
     for (const side of [war.attacker, war.defender]) {
       const fleetPct = Math.max(0, Math.min(100, Math.round((side.fleet / (side.fleet0 || 1)) * 100)));
       const standingCls = side.standing > 5 ? 'price-low' : side.standing < -5 ? 'price-high' : '';
@@ -2485,7 +2502,7 @@ function shipWhereabouts(ship) {
   }
   const dest = state.planetIndex.get(ship.dest_planet_id);
   return {
-    label: `en vol → ${dest.planet.name} (t${ship.arrival_tick})${ship.escorted ? ' 🛡' : ''}`,
+    label: `en vol → ${dest.planet.name} (arr. ${dateShort(ship.arrival_tick)})${ship.escorted ? ' 🛡' : ''}`,
     free: false,
   };
 }
@@ -2502,7 +2519,7 @@ async function renderFleetPanel() {
     <button class="back-link" id="back-to-system">← retour</button>
     <h2 class="panel-title">Flotte — ${ships.length}/${p.maxFleet}</h2>
     <p class="panel-sub">${freeCount} disponible${freeCount > 1 ? 's' : ''} ·
-      entretien ${fmtNum.format(p.fleetUpkeep)} cr/tick</p>
+      entretien ${fmtNum.format(p.fleetUpkeep)} cr/j</p>
   `;
 
   html += `<div class="section-label">Vaisseaux (${ships.length})</div>`;
@@ -2574,7 +2591,7 @@ async function renderFleetPanel() {
     html += `<div class="industry">📦 <span class="goto-link" data-planet="${sc.planet_id}"
         data-system="${sc.systemId}">${sc.planetName}</span> :
       ${fmtQty(sc.remaining)}/${fmtQty(sc.quantity)} ${sc.resourceName}
-      <span class="io">— ${fmtPrice.format(sc.unit_price)} cr/u fixé · avant t${sc.expires_tick}${
+      <span class="io">— ${fmtPrice.format(sc.unit_price)} cr/u fixé · avant le ${dateShort(sc.expires_tick)}${
         sc.loyalty > 0 ? ` · fidélité ${sc.loyalty}` : ''}</span></div>`;
   }
 
@@ -2658,9 +2675,9 @@ async function renderObservatoryPanel() {
     <button class="back-link" id="back-to-system">← retour</button>
     <h2 class="panel-title">Observatoire économique</h2>
     <p class="panel-sub">Les courbes de l'empire, ses chantiers et ses menaces.</p>
-    <div class="section-label">Chiffre d'affaires / tick</div>
+    <div class="section-label">Chiffre d'affaires / jour</div>
     ${lineSpark(deltas('revenue'), '#5fd68b')}
-    <div class="section-label">Unités vendues / tick</div>
+    <div class="section-label">Unités vendues / jour</div>
     ${lineSpark(deltas('units_sold'), '#53c7f0')}
     <div class="section-label">Trésorerie</div>
     ${lineSpark(hist.map((p) => ({ v: p.credits })), '#e8b35a')}
@@ -2687,7 +2704,7 @@ async function renderObservatoryPanel() {
     const pct = Math.round((done / total) * 100);
     html += `<div class="info-block" style="border-left:3px solid ${mp.faction_color}">
       <div class="row"><span><strong>${mp.name}</strong> — ${mp.faction_name}</span>
-        <span>${pct} % · t${mp.expires_tick}</span></div>
+        <span>${pct} % · ${dateShort(mp.expires_tick)}</span></div>
       <div class="gauge"><div style="width:${pct}%;background:${mp.faction_color}"></div></div>
       <div class="row"><span>Livraison : <span class="goto-link" data-planet="${mp.capital_planet_id}"
         data-system="${mp.capital_system_id}">${mp.capital_name}</span></span><span></span></div>
@@ -3025,7 +3042,7 @@ async function openSavesOverlay() {
     row.innerHTML = `
       <div class="save-meta">
         <div><strong>${s.saveName}</strong>${s.active ? ' <span class="badge live">EN COURS</span>' : ''}</div>
-        <div class="save-sub">tick ${fmtInt.format(s.tick)} · ${s.credits != null ? fmtQty(s.credits) + ' cr' : '—'}
+        <div class="save-sub">${dateOf(s.tick)} · ${s.credits != null ? fmtQty(s.credits) + ' cr' : '—'}
           · seed ${s.seed}${s.scenario ? ' · ' + s.scenario : ''}</div>
       </div>
       <div class="save-actions">
@@ -3341,7 +3358,7 @@ async function renderFactionPanel(factionId) {
       <div class="section-label">⚔ En guerre</div>
       <div class="info-block" style="border-color:#f04545">
         <div class="row"><span>Contre</span><span>${f.war.enemy}</span></div>
-        <div class="row"><span>Depuis</span><span>tick ${f.war.since}</span></div>
+        <div class="row"><span>Depuis</span><span>${dateOf(f.war.since)}</span></div>
         ${f.war.fronts.map((fr) => `<div class="row"><span>Front : ${fr.name}</span>
           <span>${fr.pressure > 0 ? '◀ attaque' : fr.pressure < 0 ? 'défense ▶' : 'stable'}</span></div>`).join('')}
         <div class="row" style="margin-top:6px"><span>Prêt de guerre</span><span>
@@ -3388,7 +3405,7 @@ async function renderFactionPanel(factionId) {
           <div class="row"><span>Prix contractuel</span>
             <span class="price-low">${fmtPrice.format(c.unit_price)} cr/u</span></div>
           <div class="row"><span>Livraison</span><span>${c.deliver_planet_name}</span></div>
-          <div class="row"><span>Expire</span><span>tick ${c.expires_tick}</span></div>
+          <div class="row"><span>Expire</span><span>${dateOf(c.expires_tick)}</span></div>
           <button class="action-btn deliver-btn" data-contract="${c.id}" ${here ? '' : 'disabled'}>
             ${here ? 'Livrer depuis la soute' : 'Livraison à ' + c.deliver_planet_name}
           </button>
@@ -3455,7 +3472,8 @@ function computeTrends(market) {
 // ── HUD ──────────────────────────────────────────────────────────
 
 function renderHudState(s) {
-  $('#hud-tick').textContent = s.tick;
+  $('#hud-tick').textContent = dateOf(s.tick);
+  $('#hud-tick').title = `tick ${s.tick} — 1 jour par tick depuis le 01/01/3000`;
   $('#hud-seed').textContent = s.seed;
   $('#hud-counts').textContent = `${s.systems} systèmes · ${s.planets} planètes`;
   $('#btn-wars').classList.toggle('war-on', (s.wars?.length ?? 0) > 0);
@@ -3471,7 +3489,7 @@ function renderHudPlayer() {
   const dividends = (p.investments ?? []).reduce((s, i) => s + i.estimatedYield, 0);
   const flux = Math.round((dividends - p.fleetUpkeep) * 10) / 10;
   $('#hud-credits').textContent = `${fmtQty(p.credits)} cr`
-    + (p.fleetUpkeep > 0 || dividends > 0 ? ` (${flux >= 0 ? '+' : ''}${fmtNum.format(flux)}/tick)` : '');
+    + (p.fleetUpkeep > 0 || dividends > 0 ? ` (${flux >= 0 ? '+' : ''}${fmtNum.format(flux)}/j)` : '');
   $('#hud-credits').classList.toggle('price-high', p.credits < 0);
   const nextTier = !p.tiers[2].unlocked ? 2 : !p.tiers[3].unlocked ? 3 : null;
   $('#hud-prestige').textContent = fmtQty(p.prestige)
@@ -3488,7 +3506,7 @@ function renderHudPlayer() {
     $('#btn-skip').hidden = true;
   } else {
     const dest = state.planetIndex.get(ship.dest_planet_id);
-    loc.textContent = `${ship.name} — en transit vers ${dest.planet.name} (t${ship.arrival_tick})`;
+    loc.textContent = `${ship.name} — en transit vers ${dest.planet.name} (arr. ${dateShort(ship.arrival_tick)})`;
     $('#btn-skip').hidden = false;
   }
 }
@@ -3518,7 +3536,7 @@ $('#btn-refuel-hud').addEventListener('click', async () => {
 $('#btn-skip').addEventListener('click', async () => {
   const r = await apiPost('/time/skip', { shipId: selectedShip()?.id });
   if (r.ok) {
-    log(`${r.ticksPlayed} ticks écoulés — tick ${r.tick}`);
+    log(`${r.ticksPlayed} jours écoulés — nous sommes le ${dateOf(r.tick)}`);
     await fullRefresh();
   } else {
     log(`Saut impossible : ${r.error}`);
