@@ -1226,6 +1226,9 @@ function renderDockedPanel(planet, market) {
     html += `<div class="info-block">Données en direct (un de vos vaisseaux est à quai).
       Sélectionnez un vaisseau amarré ici pour commercer.</div>`;
   }
+  // Suggestion de débouché (remplie en asynchrone) : où vendre la soute,
+  // et la navette automatique en un clic depuis une concession.
+  html += '<div id="best-outlet"></div>';
 
   // Industrie : votre concession sur cette planète (ou son achat).
   const c = state.player.concessions.find((x) => x.planet_id === planet.id);
@@ -1243,6 +1246,10 @@ function renderDockedPanel(planet, market) {
         <span>${fmtQty(s.quantity)}
         ${shipHere ? `<button class="action-btn collect-btn" data-res="${s.resource_id}">→ soute</button>` : ''}
         </span></div>`;
+    }
+    if (shipHere && c.storage.length > 0) {
+      html += `<div style="margin-top:4px"><button class="action-btn mini" id="btn-collect-all"
+        title="Remplit la soute avec tout l'entrepôt (par quantités décroissantes)">tout charger → soute</button></div>`;
     }
     const shipCargo = selectedShip()?.cargo ?? [];
     if (shipHere && shipCargo.length > 0) {
@@ -1493,6 +1500,20 @@ function renderDockedPanel(planet, market) {
     });
   }
 
+  // Tout charger : on remplit la soute lot par lot (gros lots d'abord).
+  $('#btn-collect-all')?.addEventListener('click', async () => {
+    const lots = [...c.storage].sort((a, b) => b.quantity - a.quantity);
+    let moved = 0;
+    for (const lot of lots) {
+      const r = await apiPost('/concession/collect', { shipId, resourceId: lot.resource_id });
+      if (!r.ok) break; // soute pleine
+      moved += r.moved;
+    }
+    log(moved > 0 ? `${fmtQty(moved)} unités chargées en soute` : 'Soute déjà pleine');
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
+
   $('#btn-deposit')?.addEventListener('click', async () => {
     const r = await apiPost('/concession/deposit', { shipId, resourceId: $('#deposit-res').value });
     if (r.ok) log(`${fmtQty(r.moved)} ${r.name} déposés à l'entrepôt`);
@@ -1668,6 +1689,76 @@ function renderDockedPanel(planet, market) {
     });
     updateTradePreview();
   }
+
+  fillBestOutlet(planet, market); // suggestion de débouché (asynchrone)
+}
+
+// Le conseiller commercial : pour la plus grosse cargaison en soute, le
+// meilleur marché CONNU et accessible (tier) — avec le gain estimé, un
+// lien direct, et la navette automatique en un clic depuis une
+// concession (charger tout ici → vendre tout là-bas, en boucle).
+async function fillBestOutlet(planet, market) {
+  const slot = $('#best-outlet');
+  const ship = selectedShip();
+  if (!slot || !ship || ship.planet_id !== planet.id) return;
+  const cargo = [...(ship.cargo ?? [])].sort((a, b) => b.quantity - a.quantity)[0];
+  if (!cargo) { slot.innerHTML = ''; return; }
+
+  const scan = await api(`/market-scan/${cargo.resource_id}`);
+  if (state.selectedPlanet !== planet.id || !$('#best-outlet')) return;
+
+  const localPrice = market.prices.find((r) => r.resource_id === cargo.resource_id)?.price ?? 0;
+  const unlocked = new Set([1]);
+  for (const [t, info] of Object.entries(state.player.tiers ?? {})) {
+    if (info.unlocked) unlocked.add(Number(t));
+  }
+  const best = scan.markets
+    .filter((m) => m.planetId !== planet.id && unlocked.has(m.tier))
+    .sort((a, b) => b.price - a.price)[0];
+  if (!best || best.price <= localPrice * 1.05) { slot.innerHTML = ''; return; }
+
+  const gain = Math.round((best.price - localPrice) * cargo.quantity);
+  const isMyConcession = state.player.concessions.some((x) => x.planet_id === planet.id);
+  slot.innerHTML = `
+    <div class="info-block outlet">
+      💡 Meilleur débouché connu pour vos ${fmtQty(cargo.quantity)} ${cargo.name} :
+      <span class="goto-link" id="outlet-link">${best.planetName}</span>
+      — ${fmtPrice.format(best.price)} cr (ici ${fmtPrice.format(localPrice)})
+      ≈ <span class="price-low">+${fmtQty(gain)} cr</span>
+      ${best.ageTicks > 0 ? `<span class="badge age">vu il y a ${best.ageTicks} t</span>` : '<span class="badge live">live</span>'}
+      <div style="margin-top:6px">
+        <button class="action-btn mini" id="outlet-go">y aller</button>
+        ${isMyConcession ? `<button class="action-btn mini" id="outlet-shuttle"
+          title="Crée une route en boucle (charger tout ici → vendre tout là-bas) et y assigne ce vaisseau — votre premier revenu automatique">🔁 navette auto</button>` : ''}
+      </div>
+    </div>`;
+
+  const goTo = () => {
+    const sys = state.universe.systems.find((s) => s.id === best.systemId);
+    if (sys) { selectSystem(sys); selectPlanet(best.planetId); }
+  };
+  $('#outlet-link').addEventListener('click', goTo);
+  $('#outlet-go').addEventListener('click', goTo);
+  $('#outlet-shuttle')?.addEventListener('click', async () => {
+    const r = await apiPost('/routes', {
+      name: `Navette ${cargo.name} → ${best.planetName}`,
+      stops: [
+        { planetId: planet.id, actions: [{ type: 'load', resourceId: null, quantity: null }] },
+        { planetId: best.planetId, actions: [{ type: 'sell', resourceId: null, quantity: null }] },
+      ],
+    });
+    if (!r.ok) { log(`Navette refusée : ${r.error}`); return; }
+    const assigned = await apiPost(`/ships/${ship.id}/route`, { routeId: r.id });
+    if (assigned.ok) {
+      toast(`Navette créée — ${ship.name} fait la boucle tout seul désormais`, 'good');
+      playSound('objective');
+      log(`Navette « ${r.name} » créée et assignée à ${ship.name} (gérable via ROUTES)`);
+    } else {
+      log(`Assignation impossible : ${assigned.error}`);
+    }
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
 }
 
 // Re-rendu forcé (ignore le garde-fou « input actif »).
@@ -2252,19 +2343,18 @@ const GUIDE_STEPS = [
     text: 'En vol… À l\'arrivée, cliquez votre minerai dans le marché puis '
       + 'VENDRE (bouton « max vente » pour tout écouler). Le profit fait le prestige.',
     target: '#btn-sell',
-    done: () => state.guideFlags.soldOnce,
+    done: () => state.guideFlags.soldOnce
+      || (state.player?.ships ?? []).some((s) => s.mode === 'route'), // la navette vend pour vous
   },
   {
-    text: 'Premier profit ! Réinvestissez : améliorez la concession, achetez '
-      + 'un relevé de marché, visez un 2e vaisseau. La boucle est lancée.',
-    target: null,
-    done: () => (state.player?.concessions ?? []).some((c) => c.level >= 2)
-      || (state.player?.ships ?? []).length > 1
-      || (state.player?.posts ?? []).length > 0,
+    text: 'Automatisez ! Retournez à votre concession : le panneau propose '
+      + '« 🔁 navette auto » — votre vaisseau fera la boucle charger → vendre tout seul.',
+    target: '#outlet-shuttle',
+    done: () => (state.player?.ships ?? []).some((s) => s.mode === 'route'),
   },
   {
-    text: 'Vous connaissez le métier. Cap sur les OBJECTIFS — et gardez un œil '
-      + 'sur GUERRES : les pénuries des belligérants paient le mieux.',
+    text: 'Premier revenu automatique : l\'empire est né. Étendez-le — 2e vaisseau, '
+      + 'concessions, comptoirs — en suivant vos OBJECTIFS.',
     target: '#btn-objectives',
     done: () => state.guideFlags.sawObjectives,
   },
@@ -2755,6 +2845,8 @@ function renderHudPlayer() {
     + (nextTier ? ` / ${fmtQty(p.tiers[nextTier].prestigeRequired)} (T${nextTier})` : ' (T3 ✓)');
   $('#hud-cargo').textContent = `${fmtQty(ship.cargoUsed)} / ${fmtQty(ship.cargo_capacity)}`;
   $('#hud-fuel').textContent = `${fmtQty(ship.fuel)} / ${fmtQty(ship.fuel_capacity)}`;
+  $('#btn-refuel-hud').disabled = ship.planet_id === null
+    || ship.fuel >= ship.fuel_capacity - 0.5;
 
   const loc = $('#hud-location');
   if (ship.planet_id !== null) {
@@ -2779,6 +2871,16 @@ for (const btn of document.querySelectorAll('.time-btn[data-speed]')) {
     }
   });
 }
+
+// Le plein, toujours à portée de main quand le vaisseau est à quai.
+$('#btn-refuel-hud').addEventListener('click', async () => {
+  const r = await apiPost('/refuel', { shipId: selectedShip()?.id });
+  if (r.ok) log(`Plein : +${fmtInt.format(r.quantity)} carburant à ${fmtPrice.format(r.unitPrice)} (−${fmtPrice.format(r.total)} cr)`);
+  else log(`Ravitaillement impossible : ${r.error}`);
+  await refreshPlayerAndKnowledge();
+  renderHudPlayer();
+  refreshPlanetPanel();
+});
 
 $('#btn-skip').addEventListener('click', async () => {
   const r = await apiPost('/time/skip', { shipId: selectedShip()?.id });
