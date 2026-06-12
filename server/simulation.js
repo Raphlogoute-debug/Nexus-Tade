@@ -17,6 +17,8 @@ import { tickFleets } from './factions/fleet.js';
 import { tickContracts } from './factions/contracts.js';
 import { tickTraders } from './npc/traders.js';
 import { tickConcessions } from './player/concession.js';
+import { tickTradingPosts } from './player/posts.js';
+import { checkObjectives } from './player/objectives.js';
 import { tickAutoShips } from './player/automation.js';
 import { tickRouteShips } from './player/routes.js';
 import { tickFleetUpkeep } from './player/shipyard.js';
@@ -46,10 +48,12 @@ export function runTick(db) {
     tickTraders(db, tick);
     tickContracts(db, tick);
     tickConcessions(db);
+    tickTradingPosts(db, tick);
     tickFleetUpkeep(db);
     tickAutoShips(db, tick);
     tickRouteShips(db, tick);
     events = processArrivals(db, tick);
+    if (tick % 5 === 0) checkObjectives(db, tick);
     if (tick % 50 === 0) pruneEvents(db);
   })();
 

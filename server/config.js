@@ -130,6 +130,26 @@ export const CONFIG = {
       NETWORK_INTEL_MULT: 0.5, // tech Réseau de courtage (relevés)
     },
 
+    // Comptoirs commerciaux (Phase 10) : une présence marchande permanente
+    // sur n'importe quelle planète accessible. Le comptoir stocke,
+    // télégraphie son marché (connaissance toujours fraîche) et exécute
+    // des ORDRES PERMANENTS chaque tick — acheter sous une limite, vendre
+    // au-dessus d'un plancher — via les mêmes primitives de marché que
+    // tout le monde : c'est l'outil d'influence des prix (accaparer un
+    // stock, inonder un marché, encaisser l'écart sans bouger un vaisseau).
+    POSTS: {
+      BASE_PRICE: 40000, // 1er comptoir ; double à chaque suivant
+      MAX_POSTS: 4,
+      MAX_POSTS_NETWORK: 8, // avec la tech Réseau de courtage
+      // cap = entrepôt, flow = unités max échangées par tick et par ordre.
+      LEVELS: [
+        { cap: 3000, flow: 40, cost: 0 },
+        { cap: 8000, flow: 100, cost: 35000 },
+        { cap: 20000, flow: 250, cost: 120000 },
+      ],
+      MAX_ORDERS: 6, // ordres permanents par comptoir
+    },
+
     // Prestige : 1 point par tranche de profit réalisé, bonus par nouveau
     // partenaire commercial (première transaction avec une planète).
     PRESTIGE: {

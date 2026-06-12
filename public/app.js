@@ -517,23 +517,33 @@ function drawSystems(t) {
   }
 }
 
-// — Vos installations : coins ambre autour des systèmes à concession —
+// — Vos installations : coins autour des systèmes où vous êtes établi —
+// ambre = concession (industrie), vert = comptoir (commerce).
+
+function drawCorners(sx, sy, d, color) {
+  const l = 3.5;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(sx - d + l, sy - d); ctx.lineTo(sx - d, sy - d); ctx.lineTo(sx - d, sy - d + l);
+  ctx.moveTo(sx + d - l, sy - d); ctx.lineTo(sx + d, sy - d); ctx.lineTo(sx + d, sy - d + l);
+  ctx.moveTo(sx - d + l, sy + d); ctx.lineTo(sx - d, sy + d); ctx.lineTo(sx - d, sy + d - l);
+  ctx.moveTo(sx + d - l, sy + d); ctx.lineTo(sx + d, sy + d); ctx.lineTo(sx + d, sy + d - l);
+  ctx.stroke();
+}
 
 function drawPlayerAssets() {
   for (const c of state.player?.concessions ?? []) {
     const entry = state.planetIndex.get(c.planet_id);
     if (!entry) continue;
     const [sx, sy] = toScreen(entry.system.x, entry.system.y);
-    const d = starRadius(entry.system) + 5;
-    const l = 3.5;
-    ctx.strokeStyle = 'rgba(232,179,90,0.85)';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(sx - d + l, sy - d); ctx.lineTo(sx - d, sy - d); ctx.lineTo(sx - d, sy - d + l);
-    ctx.moveTo(sx + d - l, sy - d); ctx.lineTo(sx + d, sy - d); ctx.lineTo(sx + d, sy - d + l);
-    ctx.moveTo(sx - d + l, sy + d); ctx.lineTo(sx - d, sy + d); ctx.lineTo(sx - d, sy + d - l);
-    ctx.moveTo(sx + d - l, sy + d); ctx.lineTo(sx + d, sy + d); ctx.lineTo(sx + d, sy + d - l);
-    ctx.stroke();
+    drawCorners(sx, sy, starRadius(entry.system) + 5, 'rgba(232,179,90,0.85)');
+  }
+  for (const p of state.player?.posts ?? []) {
+    const entry = state.planetIndex.get(p.planet_id);
+    if (!entry) continue;
+    const [sx, sy] = toScreen(entry.system.x, entry.system.y);
+    drawCorners(sx, sy, starRadius(entry.system) + 8, 'rgba(95,214,139,0.85)');
   }
 }
 
@@ -1059,6 +1069,81 @@ function renderDockedPanel(planet, market) {
     `;
   }
 
+  // Comptoir commercial : entrepôt + ordres permanents qui pèsent sur
+  // les prix locaux (acheter sous une limite, vendre au-dessus d'un
+  // plancher) — l'outil d'accaparement.
+  const post = (state.player.posts ?? []).find((x) => x.planet_id === planet.id);
+  if (post) {
+    const pct = Math.round((post.used / post.cap) * 100);
+    html += `
+      <div class="section-label">Comptoir commercial (niv. ${post.level}) — débit ${fmtQty(post.flow)}/tick</div>
+      <div class="info-block">
+        <div class="row"><span>Entrepôt</span><span>${fmtQty(post.used)} / ${fmtQty(post.cap)} (${pct} %)</span></div>
+        <div class="gauge"><div style="width:${pct}%"></div></div>
+    `;
+    for (const s of post.storage) {
+      html += `<div class="row"><span>${s.name}
+        <span style="color:var(--dim)">(coût moy. ${fmtPrice.format(s.avg_cost)})</span></span>
+        <span>${fmtQty(s.quantity)}
+        ${shipHere ? `<button class="action-btn post-withdraw" data-res="${s.resource_id}">→ soute</button>` : ''}
+        </span></div>`;
+    }
+    const postCargo = selectedShip()?.cargo ?? [];
+    if (shipHere && postCargo.length > 0) {
+      html += `<div class="row" style="margin-top:6px"><span>Déposer</span><span>
+        <select id="post-deposit-res">${postCargo.map((x) =>
+          `<option value="${x.resource_id}">${x.name} (${fmtQty(x.quantity)})</option>`).join('')}</select>
+        <button class="action-btn" id="btn-post-deposit">→ comptoir</button></span></div>`;
+    }
+    html += `
+        ${post.nextLevelCost !== null
+          ? `<button class="action-btn" id="btn-post-upgrade" data-pid="${post.id}">Agrandir (${fmtQty(post.nextLevelCost)} cr)</button>`
+          : '<span class="badge">niveau max</span>'}
+      </div>
+    `;
+
+    html += `<div class="section-label">Ordres permanents (${post.orders.length}/${state.player.maxPostOrders})</div>`;
+    for (const o of post.orders) {
+      const live = o.last_qty > 0
+        ? `<span class="${o.side === 'buy' ? 'price-low' : 'price-high'}">${
+            o.side === 'buy' ? '+' : '−'}${fmtQty(o.last_qty)} à ${fmtPrice.format(o.last_price)}</span>`
+        : '<span class="io">en veille</span>';
+      html += `<div class="industry">${o.side === 'buy' ? 'ACHAT' : 'VENTE'} ${o.name}
+        <span class="io">— ${o.side === 'buy' ? 'tant que ≤' : 'tant que ≥'} ${fmtPrice.format(o.limit_price)} cr
+        · ${fmtQty(o.flow)}/tick</span> · ${live}
+        ${shipHere ? `<button class="action-btn post-del-order" data-pid="${post.id}" data-oid="${o.id}">✕</button>` : ''}</div>`;
+    }
+    if (shipHere) {
+      const inputStyle = 'background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;padding:3px 5px';
+      html += `<div class="info-block">
+        <div class="row"><span>
+          <select id="post-order-side">
+            <option value="buy">Acheter tant que prix ≤</option>
+            <option value="sell">Vendre tant que prix ≥</option>
+          </select>
+          <select id="post-order-res">${market.prices.map((r) =>
+            `<option value="${r.resource_id}">${r.name}</option>`).join('')}</select>
+        </span></div>
+        <div class="row" style="margin-top:5px"><span>
+          <input type="number" id="post-order-limit" placeholder="limite (cr)" min="0.1" step="0.1" style="width:100px;${inputStyle}">
+          <input type="number" id="post-order-flow" placeholder="u/tick" min="1" max="${post.flow}" value="${post.flow}" style="width:74px;${inputStyle}">
+          <button class="action-btn" id="btn-post-order">Poser l'ordre</button>
+        </span></div>
+        <div style="color:var(--dim);font-size:11px;margin-top:5px">Un ordre d'achat draine le
+          marché — le prix MONTE (accaparement). Un ordre de vente l'inonde — le prix BAISSE.
+          Reposer le même couple ressource + sens remplace l'ordre.</div>
+      </div>`;
+    }
+  } else if (shipHere && (state.player.posts ?? []).length < state.player.maxPosts) {
+    html += `
+      <div class="section-label">Commerce permanent</div>
+      <button class="action-btn" id="btn-buy-post"
+        title="Entrepôt sur place, marché télégraphié en continu (relevés toujours frais), ordres permanents d'achat/vente qui pèsent sur les prix">
+        Ouvrir un comptoir ici (${fmtQty(state.player.nextPostPrice)} cr)
+      </button>
+    `;
+  }
+
   // La Frange vend des pavillons de complaisance (anonymat commercial).
   if (shipHere && planet.faction_id === null && !ship.false_flag) {
     html += `
@@ -1248,6 +1333,69 @@ function renderDockedPanel(planet, market) {
     await refreshPlayerAndKnowledge();
     refreshPlanetPanelForce();
   });
+
+  // — Comptoir : achat, agrandissement, transferts, ordres ————————
+  $('#btn-buy-post')?.addEventListener('click', async () => {
+    const r = await apiPost('/posts/buy', { shipId });
+    if (r.ok) log(`Comptoir ouvert sur ${r.planetName} (−${fmtQty(r.price)} cr) — son marché vous est télégraphié`);
+    else log(`Comptoir refusé : ${r.error}`);
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
+
+  $('#btn-post-upgrade')?.addEventListener('click', async (e) => {
+    const r = await apiPost(`/posts/${e.target.dataset.pid}/upgrade`);
+    if (r.ok) log(`Comptoir niveau ${r.level} — entrepôt ${fmtQty(r.cap)}, débit ${fmtQty(r.flow)}/tick (−${fmtQty(r.cost)} cr)`);
+    else log(`Agrandissement impossible : ${r.error}`);
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
+
+  for (const btn of panel.querySelectorAll('.post-withdraw')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost('/posts/transfer', { shipId, resourceId: btn.dataset.res, direction: 'withdraw' });
+      if (r.ok) log(`${fmtQty(r.moved)} ${r.name} chargés depuis le comptoir`);
+      else log(`Chargement impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+
+  $('#btn-post-deposit')?.addEventListener('click', async () => {
+    const r = await apiPost('/posts/transfer', {
+      shipId, resourceId: $('#post-deposit-res').value, direction: 'deposit',
+    });
+    if (r.ok) log(`${fmtQty(r.moved)} ${r.name} déposés au comptoir`);
+    else log(`Dépôt impossible : ${r.error}`);
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
+
+  $('#btn-post-order')?.addEventListener('click', async () => {
+    const r = await apiPost(`/posts/${post.id}/orders`, {
+      resourceId: $('#post-order-res').value,
+      side: $('#post-order-side').value,
+      limitPrice: Number($('#post-order-limit').value),
+      flow: Number($('#post-order-flow').value),
+    });
+    if (r.ok) {
+      log(`Ordre ${r.replaced ? 'remplacé' : 'posé'} : ${r.side === 'buy' ? 'ACHAT' : 'VENTE'} ${r.name} `
+        + `${r.side === 'buy' ? '≤' : '≥'} ${fmtPrice.format(r.limitPrice)} cr (${fmtQty(r.flow)}/tick)`);
+    } else {
+      log(`Ordre refusé : ${r.error}`);
+    }
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
+
+  for (const btn of panel.querySelectorAll('.post-del-order')) {
+    btn.addEventListener('click', async () => {
+      await fetch(`/api/posts/${btn.dataset.pid}/orders/${btn.dataset.oid}`, { method: 'DELETE' });
+      log('Ordre permanent retiré');
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
 
   $('#btn-refuel')?.addEventListener('click', async () => {
     const r = await apiPost('/refuel', { shipId });
@@ -1497,6 +1645,53 @@ async function renderMarketsPanel() {
 }
 
 $('#btn-markets').addEventListener('click', renderMarketsPanel);
+
+// ── Panneau : objectifs / fin de partie ──────────────────────────
+
+async function renderObjectivesPanel() {
+  const objectives = await api('/objectives');
+  state.selectedPlanet = null;
+
+  const doneCount = objectives.filter((o) => o.done).length;
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title">Objectifs — ${doneCount}/${objectives.length}</h2>
+    <p class="panel-sub">La route du Nexus : du colporteur à LA puissance
+      commerciale de la galaxie. Chaque jalon rapporte du prestige.</p>
+  `;
+  for (const o of objectives) {
+    html += `<div class="info-block ${o.done ? 'objective-done' : ''} ${o.victory ? 'objective-victory' : ''}">
+      <div class="row"><span><strong>${o.victory ? '★ ' : ''}${o.name}</strong></span>
+        <span>${o.done
+          ? `<span class="badge live">ATTEINT · t${o.completedTick}</span>`
+          : `<span class="badge">+${fmtInt.format(o.reward)} prestige</span>`}</span></div>
+      <div style="color:var(--dim);margin-top:3px">${o.desc}</div>`;
+    if (!o.done) {
+      for (const p of o.progress) {
+        const pctObj = Math.min(100, Math.round((p.value / p.goal) * 100));
+        html += `<div class="row" style="margin-top:5px"><span>${p.label}</span>
+          <span>${fmtQty(p.value)} / ${fmtQty(p.goal)}</span></div>
+          <div class="gauge"><div style="width:${pctObj}%"></div></div>`;
+      }
+    }
+    html += `</div>`;
+  }
+
+  panel.innerHTML = html;
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+}
+
+$('#btn-objectives').addEventListener('click', renderObjectivesPanel);
+
+// Victoire : l'événement « victory » déclenche la bannière (une fois).
+function showVictory(message) {
+  $('#victory-text').textContent = message;
+  $('#victory').hidden = false;
+}
+$('#victory-close').addEventListener('click', () => { $('#victory').hidden = true; });
 
 // ── Panneau : technologies ───────────────────────────────────────
 
@@ -1927,6 +2122,7 @@ async function pollEvents() {
   for (const e of events) {
     state.lastEventId = Math.max(state.lastEventId, e.id);
     log(e.message);
+    if (e.type === 'victory') showVictory(e.message);
     if (['war', 'peace', 'conquest'].includes(e.type)) territoryChanged = true;
   }
   if (territoryChanged) {

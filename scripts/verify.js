@@ -27,6 +27,8 @@ import { createRoute, assignRoute, deleteRoute } from '../server/player/routes.j
 import { investIndustry, divestIndustry, foundIndustry } from '../server/player/investments.js';
 import { issueLoan } from '../server/factions/loans.js';
 import { buyFalseFlag } from '../server/player/smuggling.js';
+import { buyPost, setPostOrder, transferPost, upgradePost, listPosts } from '../server/player/posts.js';
+import { listObjectives } from '../server/player/objectives.js';
 import { RECIPES as ALL_RECIPES, recipeOutput } from '../data/recipes.js';
 
 const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
@@ -1020,8 +1022,105 @@ const bioRuns = tickResult.industryRuns.find(
 check(bioFactory.ok && Boolean(bioRuns) && bioRuns.runs > 0,
   bioFactory.ok && `Bioréacteurs fondés sur ${bioFactory.planetName} : ${bioRuns?.runs.toFixed(1)} runs au premier tick → nourriture synthétique`);
 
+// ── Phase 10 : comptoirs commerciaux et objectifs ────────────────
+
+console.log('\n■ Phase 10 — Comptoirs commerciaux (influence des prix)\n');
+
+db.prepare('UPDATE player SET credits = 500000 WHERE id = 1').run();
+
+// Un monde T1 (ouvert à tous) avec une ressource au stock moyen, peu
+// produite sur place, et au prix NON clampé (sinon le drainage ne se
+// verrait pas) : l'ordre d'achat doit y faire monter le prix.
+const postCandidates = db.prepare(
+  `SELECT p.id, p.name, pr.resource_id, pr.stock, pr.price
+   FROM planets p
+   JOIN planet_resources pr ON pr.planet_id = p.id
+   WHERE p.population < 50 AND pr.stock BETWEEN 300 AND 1500 AND pr.production < 2
+   ORDER BY pr.stock ASC`
+).all();
+const postTarget = postCandidates.find((c) => {
+  const base = RESOURCES[c.resource_id].basePrice;
+  return c.price >= base * 0.5 && c.price <= base * 1.5;
+});
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(postTarget.id, flagship.id);
+
+const postBought = buyPost(db, flagship.id);
+check(postBought.ok && listPosts(db).length === 1,
+  postBought.ok && `comptoir ouvert sur ${postBought.planetName} (${fmt(postBought.price)} cr)`);
+
+// Ordre d'ACHAT permanent, limite bien au-dessus du prix : il draine le
+// marché tick après tick — le stock local fond, le prix monte.
+const postId = postBought.id;
+const buyOrder = setPostOrder(db, postId, postTarget.resource_id, 'buy', postTarget.price * 3, 40);
+check(buyOrder.ok, buyOrder.ok && `ordre permanent : ACHAT ${buyOrder.name} ≤ ${buyOrder.limitPrice.toFixed(2)} cr (40/tick)`);
+
+for (let i = 0; i < 3; i++) runTick(db);
+
+const postAfterBuy = listPosts(db)[0];
+const heldByPost = postAfterBuy.storage.find((s) => s.resource_id === postTarget.resource_id);
+const marketAfterBuy = db.prepare(
+  'SELECT stock, price FROM planet_resources WHERE planet_id = ? AND resource_id = ?'
+).get(postTarget.id, postTarget.resource_id);
+check(Boolean(heldByPost) && heldByPost.quantity >= 100 && heldByPost.avg_cost > 0,
+  `le comptoir accapare sans vaisseau : ${heldByPost?.quantity.toFixed(0)} u en entrepôt en 3 ticks`
+  + ` (coût moyen ${heldByPost?.avg_cost.toFixed(2)} cr)`);
+check(marketAfterBuy.price > postTarget.price,
+  `l'accaparement pèse sur le marché : prix ${postTarget.price.toFixed(2)} → ${marketAfterBuy.price.toFixed(2)} cr`);
+check(postAfterBuy.orders[0].last_qty > 0,
+  `retour d'exécution : ${postAfterBuy.orders[0].last_qty} u au dernier tick à ${postAfterBuy.orders[0].last_price.toFixed(2)} cr`);
+
+// Bascule en VENTE : plancher sous le prix courant — l'entrepôt se
+// déverse sur le marché et les crédits rentrent.
+const delBuy = db.prepare('DELETE FROM post_orders WHERE post_id = ?').run(postId).changes;
+const sellOrder = setPostOrder(db, postId, postTarget.resource_id, 'sell', marketAfterBuy.price * 0.3, 40);
+const creditsBeforeSell = getPlayer(db).credits;
+runTick(db);
+const postAfterSell = listPosts(db)[0];
+check(delBuy === 1 && sellOrder.ok && getPlayer(db).credits > creditsBeforeSell
+  && (postAfterSell.storage.find((s) => s.resource_id === postTarget.resource_id)?.quantity ?? 0)
+    < heldByPost.quantity,
+  'ordre de VENTE : l\'entrepôt se déverse, les crédits rentrent');
+
+// Remplacement d'ordre (même ressource + même sens) et télégraphe : la
+// connaissance du marché du comptoir reste fraîche sans vaisseau.
+const replaced = setPostOrder(db, postId, postTarget.resource_id, 'sell', 1, 10);
+check(replaced.ok && replaced.replaced
+  && db.prepare('SELECT COUNT(*) AS n FROM post_orders WHERE post_id = ?').get(postId).n === 1,
+  'reposer le même couple ressource + sens remplace l\'ordre');
+const knownFresh = db.prepare(
+  'SELECT seen_tick FROM known_prices WHERE planet_id = ? AND resource_id = ?'
+).get(postTarget.id, postTarget.resource_id);
+check(knownFresh.seen_tick === getCurrentTick(db),
+  'le comptoir télégraphie son marché : relevés toujours frais');
+
+// Transferts soute ↔ comptoir, agrandissement.
+const withdrawn = transferPost(db, flagship.id, postTarget.resource_id, 5, 'withdraw');
+const upgraded = upgradePost(db, postId);
+check(withdrawn.ok && withdrawn.moved === 5 && upgraded.ok && upgraded.level === 2,
+  `retrait vers la soute (5 u) et agrandissement niveau 2 (entrepôt ${fmt(upgraded.cap)}, débit ${upgraded.flow}/tick)`);
+
+// ── Phase 10 : objectifs / fin de partie ─────────────────────────
+
+console.log('\n■ Phase 10 — Objectifs et fin de partie\n');
+
+for (let i = 0; i < 5; i++) runTick(db); // passe par un tick multiple de 5
+
+const objectives = listObjectives(db);
+const nestEgg = objectives.find((o) => o.id === 'nest_egg');
+const nexus = objectives.find((o) => o.id === 'nexus');
+const doneCount = objectives.filter((o) => o.done).length;
+check(nestEgg.done && doneCount >= 3,
+  `${doneCount} jalons atteints en jeu (dont « ${nestEgg.name} » à 100 k crédits)`);
+check(!nexus.done && nexus.victory && nexus.progress.length === 3,
+  'la victoire « LE NEXUS » reste à conquérir (3 conditions suivies)');
+check(db.prepare("SELECT COUNT(*) AS n FROM world_events WHERE type = 'objective'").get().n >= 1,
+  'chaque jalon est annoncé dans le journal et récompensé en prestige');
+const inProgress = objectives.find((o) => !o.done && o.progress[0].goal > 0);
+check(Boolean(inProgress) && inProgress.progress[0].value <= inProgress.progress[0].goal,
+  `progression suivie : « ${inProgress?.name} » à ${inProgress?.progress[0].value}/${inProgress?.progress[0].goal} ${inProgress?.progress[0].label}`);
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 9 vérifiées : économie, guerres, flotte, industrie, routes, investissements, prêts et contrebande OK\n');
+  : '\n✓ Phases 1 à 10 vérifiées : économie, guerres, flotte, industrie, routes, investissements, prêts, contrebande, comptoirs et objectifs OK\n');
 process.exit(failures ? 1 : 0);

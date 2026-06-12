@@ -129,6 +129,41 @@ CREATE TABLE IF NOT EXISTS facility_workshops (
   PRIMARY KEY (concession_id, recipe_id)
 );
 
+-- Comptoirs commerciaux (Phase 10) : présence marchande permanente.
+-- L'entrepôt du comptoir et ses ordres permanents (acheter sous une
+-- limite / vendre au-dessus d'un plancher, exécutés chaque tick).
+CREATE TABLE IF NOT EXISTS trading_posts (
+  id        INTEGER PRIMARY KEY,
+  planet_id INTEGER NOT NULL UNIQUE,
+  level     INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS post_storage (
+  post_id     INTEGER NOT NULL,
+  resource_id TEXT NOT NULL,
+  quantity    REAL NOT NULL DEFAULT 0,
+  avg_cost    REAL NOT NULL DEFAULT 0, -- coût moyen d'acquisition (suivi du profit)
+  PRIMARY KEY (post_id, resource_id)
+);
+
+CREATE TABLE IF NOT EXISTS post_orders (
+  id          INTEGER PRIMARY KEY,
+  post_id     INTEGER NOT NULL,
+  resource_id TEXT NOT NULL,
+  side        TEXT NOT NULL,        -- buy | sell
+  limit_price REAL NOT NULL,        -- achat si prix ≤ limite ; vente si prix ≥ plancher
+  flow        REAL NOT NULL,        -- unités max échangées par tick
+  last_qty    REAL NOT NULL DEFAULT 0, -- exécuté au dernier tick (retour UI)
+  last_price  REAL NOT NULL DEFAULT 0
+);
+
+-- Objectifs : jalons de la carrière marchande (id du catalogue
+-- data/objectives.js), avec le tick où chacun a été atteint.
+CREATE TABLE IF NOT EXISTS objectives (
+  id             TEXT PRIMARY KEY,
+  completed_tick INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS player_tech (
   tech_id       TEXT PRIMARY KEY,
   acquired_tick INTEGER NOT NULL
@@ -374,6 +409,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
+      'objectives', 'post_orders', 'post_storage', 'trading_posts',
       'loans', 'industry_shares', 'route_stops', 'routes',
       'player_tech', 'facility_workshops', 'facility_storage', 'concessions',
       'world_events', 'faction_standing', 'war_fronts', 'wars', 'faction_relations',

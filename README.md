@@ -258,6 +258,28 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   ni grief) ; chaque opération risquée a 10 % de chances de percer la
   couverture : pavillon brûlé, −15 de réputation, et la saisie suit
 
+**Phase 10 — comptoirs commerciaux et objectifs** (`server/player/posts.js`,
+`server/player/objectives.js`, `data/objectives.js`)
+- **Comptoirs** (40 k cr, ×2 à chaque suivant, 4 max — 8 avec Réseau de
+  courtage) : une présence marchande permanente sur n'importe quelle
+  planète accessible (tier requis). Entrepôt sur place (3 niveaux :
+  3 000 → 20 000 u, transferts soute ↔ comptoir), marché télégraphié
+  en continu (vos relevés y restent frais sans vaisseau)
+- **Ordres permanents** — l'outil d'influence des prix : « acheter tant
+  que le prix ≤ limite » draine le marché tick après tick (le prix
+  MONTE — l'accaparement) ; « vendre tant que le prix ≥ plancher »
+  l'inonde (le prix BAISSE). Jusqu'à 6 ordres par comptoir, débit
+  40 → 250 u/tick selon le niveau, exécutés via les mêmes primitives de
+  marché que tout le monde — accaparer un stock, créer la pénurie,
+  revendre au pic, sans bouger un vaisseau. Aucun prestige par
+  procuration : le prestige se gagne en personne
+- **Objectifs** : 12 jalons de carrière vérifiés en jeu (panneau
+  OBJECTIFS, progression par condition), chacun récompensé en prestige
+  et annoncé au journal — du « Routier des étoiles » (10 partenaires)
+  au « Magnat » (10 M cr). Le dernier, « LE NEXUS » (100 M cr + tier 3
+  + présence dans 8 systèmes), est la **victoire** : bannière, puis la
+  partie continue en bac à sable
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - Carte vivante, rendue en continu (requestAnimationFrame) : fond étoilé
   en parallaxe avec nébuleuses, territoires de faction en halos doux
@@ -300,6 +322,10 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `GET /api/market-scan/:resourceId` | tous vos marchés connus d'une ressource (arbitrage + heatmap) |
 | `GET /api/alerts` | ce qui réclame votre attention (découvert, guerre, entrepôt saturé…) |
 | `GET /api/traffic` | convois et marchands en transit (anime la carte ; cosmétique, ne fuite aucun prix) |
+| `POST /api/posts/buy` · `/posts/:id/upgrade` | ouvrir / agrandir un comptoir commercial |
+| `POST /api/posts/:id/orders` · `DELETE .../orders/:oid` | ordres permanents (achat ≤ limite / vente ≥ plancher) |
+| `POST /api/posts/transfer` | transferts soute ↔ entrepôt du comptoir |
+| `GET /api/objectives` | jalons de carrière : statut, progression, victoire |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |
 | `POST /api/concession/collect` · `/deposit` · `/upgrade` | transferts entrepôt↔soute, amélioration |
@@ -363,12 +389,14 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
   prix vivants seulement), voisinages stellaires précalculés et scans
   partagés pour les PNJ et la flotte.
 
-## Reste à faire (Phase 10+)
+## Reste à faire (Phase 11+)
 
-- Recettes alternatives (rendements différents selon la filière),
-  ressources exotiques ultra-rares par biome
-- Objectifs/fins de partie (premier milliard ? monopole d'une chaîne ?),
-  équilibrage global après sessions de jeu réelles
+- Contrôle des routes : piraterie qui intercepte les convois, escortes,
+  points de passage stratégiques à sécuriser
+- Profit de guerre approfondi : embargos à exploiter/contourner, ventes
+  d'armes aux deux camps avec conséquences
+- Ressources exotiques ultra-rares par biome ; équilibrage global après
+  sessions de jeu réelles
 - SSE à la place du polling ; état de simulation en mémoire si un jour
   les ~100 ms/tick ne suffisent plus ; événements économiques (repoussés
   à la demande du joueur)

@@ -30,6 +30,11 @@ import {
   listConcessions, collectConcession, depositToConcession, upgradeConcession,
   buyConcession, installWorkshop, maxConcessions,
 } from '../player/concession.js';
+import {
+  listPosts, buyPost, upgradePost, setPostOrder, deletePostOrder,
+  transferPost, maxPosts,
+} from '../player/posts.js';
+import { listObjectives } from '../player/objectives.js';
 import { techCatalog, researchTech, unlockedRecipes, hasTech } from '../player/tech.js';
 import {
   knownMarket, knowledgeSummary, intelCost, recordIntel, systemDistance,
@@ -402,6 +407,11 @@ export function createApiRouter(db, clock) {
       nextConcessionPrice: CONFIG.PLAYER.FACILITIES.CONCESSION_BASE_PRICE
         * 2 ** Math.max(0, concessions.length - 1),
       maxConcessions: maxConcessions(db),
+      posts: listPosts(db),
+      nextPostPrice: CONFIG.PLAYER.POSTS.BASE_PRICE
+        * 2 ** db.prepare('SELECT COUNT(*) AS n FROM trading_posts').get().n,
+      maxPosts: maxPosts(db),
+      maxPostOrders: CONFIG.PLAYER.POSTS.MAX_ORDERS,
       // Ateliers installables (selon les filières recherchées).
       workshopCatalog: (() => {
         const unlocked = unlockedRecipes(db);
@@ -610,6 +620,54 @@ export function createApiRouter(db, clock) {
       return res.status(400).json({ error: 'paramètres invalides' });
     }
     answer(res, installWorkshop(db, id, recipeId));
+  });
+
+  // ── Comptoirs commerciaux (Phase 10) ───────────────────────────
+  router.post('/posts/buy', (req, res) => {
+    const shipId = parseShipId(req.body?.shipId);
+    if (shipId === null) return res.status(400).json({ error: 'shipId invalide' });
+    answer(res, buyPost(db, shipId));
+  });
+
+  router.post('/posts/:id/upgrade', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id invalide' });
+    answer(res, upgradePost(db, id));
+  });
+
+  // Poser/remplacer un ordre permanent (un par ressource et par sens).
+  router.post('/posts/:id/orders', (req, res) => {
+    const id = parseId(req.params.id);
+    const { resourceId, side } = req.body ?? {};
+    const limitPrice = Number(req.body?.limitPrice);
+    const flow = Number(req.body?.flow);
+    if (id === null || typeof resourceId !== 'string' || typeof side !== 'string') {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, setPostOrder(db, id, resourceId, side, limitPrice, flow));
+  });
+
+  router.delete('/posts/:id/orders/:orderId', (req, res) => {
+    const id = parseId(req.params.id);
+    const orderId = parseId(req.params.orderId);
+    if (id === null || orderId === null) return res.status(400).json({ error: 'id invalide' });
+    answer(res, deletePostOrder(db, id, orderId));
+  });
+
+  // Transferts soute ↔ entrepôt du comptoir.
+  router.post('/posts/transfer', (req, res) => {
+    const shipId = parseShipId(req.body?.shipId);
+    const { resourceId, direction } = req.body ?? {};
+    const quantity = req.body?.quantity === undefined ? undefined : parseQty(req.body.quantity);
+    if (shipId === null || typeof resourceId !== 'string' || quantity === null) {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, transferPost(db, shipId, resourceId, quantity, direction));
+  });
+
+  // ── Objectifs / fin de partie ───────────────────────────────────
+  router.get('/objectives', (req, res) => {
+    res.json(listObjectives(db));
   });
 
   // ── Renseignement ──────────────────────────────────────────────
