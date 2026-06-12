@@ -28,11 +28,12 @@
     <span class="hud-item">SOUTE <strong id="hud-cargo">—</strong></span>
     <span class="hud-item">CARBURANT <strong id="hud-fuel">—</strong></span>
     <span class="hud-item" id="hud-location">—</span>
-    <button id="btn-tech" class="time-btn" title="Arbre technologique">TECH</button>
-    <button id="btn-routes" class="time-btn" title="Routes logistiques">ROUTES</button>
-    <button id="btn-markets" class="time-btn" title="Comparateur de marchés / arbitrage">MARCHÉS</button>
-    <button id="btn-objectives" class="time-btn" title="Jalons de carrière et victoire">OBJECTIFS</button>
-    <button id="btn-house" class="time-btn" title="Maison de commerce, QG, classement">MAISON</button>
+    <button id="btn-tech" class="time-btn nav-btn" title="Arbre technologique">TECH</button>
+    <button id="btn-routes" class="time-btn nav-btn" title="Routes logistiques">ROUTES</button>
+    <button id="btn-markets" class="time-btn nav-btn" title="Comparateur de marchés / arbitrage">MARCHÉS</button>
+    <button id="btn-objectives" class="time-btn nav-btn" title="Jalons de carrière et victoire">OBJECTIFS</button>
+    <button id="btn-house" class="time-btn nav-btn" title="Maison de commerce, QG, classement">MAISON</button>
+    <button id="btn-help" class="time-btn nav-btn" title="Aide et légende de la carte">?</button>
     <span id="time-controls">
       <button class="time-btn" data-speed="0" title="Pause">⏸</button>
       <button class="time-btn" data-speed="1" title="Vitesse normale">×1</button>
@@ -60,7 +61,7 @@
         </ul>
       </div>
       <div id="journal">
-        <div class="section-label">Journal</div>
+        <button id="journal-toggle" class="section-label" title="Replier / déplier le journal">Journal <span id="journal-chevron">▾</span></button>
         <ul id="journal-list"></ul>
       </div>
     </aside>
@@ -105,8 +106,8 @@
         <input type="text" id="new-save-name" placeholder="Nom de la partie" maxlength="40">
         <div id="scenario-list"></div>
         <div class="row" style="margin-top:8px">
-          <span><input type="number" id="new-save-seed" placeholder="seed (optionnel)" min="1"></span>
-          <span><button class="action-btn" id="new-save-go">Fonder la maison</button></span>
+          <span><input type="number" id="new-save-seed" placeholder="seed (option)" min="1" title="Même seed = même univers"></span>
+          <span><button class="action-btn primary" id="new-save-go">Fonder la maison</button></span>
         </div>
       </div>
     </div>

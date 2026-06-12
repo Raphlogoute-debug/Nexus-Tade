@@ -114,18 +114,39 @@ h1 span {
 .time-btn:hover { border-color: var(--accent); color: var(--text); }
 .time-btn.active { color: var(--accent); border-color: var(--accent); }
 
+/* Boutons de navigation (panneaux) : distincts des contrôles de temps. */
+.nav-btn {
+  background: var(--panel-2);
+  color: var(--text);
+  letter-spacing: 1px;
+}
+#btn-help { min-width: 26px; }
+
 /* ── Layout deux panneaux ───────────────────────────────────── */
 
 main { flex: 1; display: flex; min-height: 0; }
 
 #panel {
-  width: 370px;
+  width: 400px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--panel);
 }
+
+/* En-tête collant du panneau : on garde le contexte en scrollant. */
+.panel-head {
+  position: sticky;
+  top: -14px;
+  z-index: 4;
+  margin: -14px -16px 10px;
+  padding: 12px 16px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.panel-head .panel-sub { margin-bottom: 2px; }
+.panel-head .back-link { margin-bottom: 4px; }
 
 #panel-content {
   flex: 1;
@@ -140,6 +161,17 @@ main { flex: 1; display: flex; min-height: 0; }
   overflow-y: auto;
   flex-shrink: 0;
 }
+#journal.folded { max-height: 34px; overflow: hidden; }
+#journal-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+#journal-toggle:hover { color: var(--accent); }
 
 #journal-list { list-style: none; margin: 0; padding: 0; font-size: 11px; }
 #journal-list li { padding: 2px 0; color: var(--dim); line-height: 1.35; }
@@ -253,6 +285,12 @@ main { flex: 1; display: flex; min-height: 0; }
 .market-row.buy td:nth-child(2) { color: var(--green); }
 .market-row.sell td:nth-child(2) { color: var(--red); }
 .goto-link { color: var(--accent); cursor: pointer; }
+.goto-link:hover { text-decoration: underline; }
+
+/* Fraîcheur des données de marché. */
+.age-live { color: var(--green); }
+.age-mid { color: var(--amber); }
+.age-old { color: var(--red); opacity: 0.8; }
 
 #tooltip {
   position: absolute;
@@ -308,6 +346,7 @@ ul.legend li { padding: 3px 0; }
 }
 
 .panel-sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; }
+.panel-sub span { white-space: nowrap; }
 
 .back-link {
   display: inline-block;
@@ -350,6 +389,26 @@ ul.legend li { padding: 3px 0; }
   color: var(--dim);
   text-transform: uppercase;
 }
+
+/* Sections repliables : l'étiquette devient un bouton avec chevron. */
+.section-label.collapsible {
+  cursor: pointer;
+  user-select: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-top: 1px solid #141a26;
+  padding: 8px 0 2px;
+  font-family: inherit;
+}
+.section-label.collapsible:hover { color: var(--accent); }
+.section-label.collapsible .chev { color: var(--accent); }
+.section-label.collapsible.closed { opacity: 0.75; }
+
+tr.tier-row.collapsible { cursor: pointer; user-select: none; }
+tr.tier-row.collapsible:hover td { color: var(--accent); }
 
 .industry { font-size: 12px; color: var(--text); padding: 2px 0; }
 .industry .io { color: var(--dim); }
@@ -415,8 +474,15 @@ tr.tier-row td {
 }
 .action-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .action-btn:disabled { opacity: 0.45; cursor: default; }
-.action-btn.buy:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
-.action-btn.sell:hover:not(:disabled) { border-color: var(--amber); color: var(--amber); }
+
+/* Acheter / Vendre : colorés en permanence, pas seulement au survol. */
+.action-btn.buy { color: var(--green); border-color: rgba(95, 214, 139, 0.45); }
+.action-btn.buy:hover:not(:disabled) { border-color: var(--green); background: rgba(95, 214, 139, 0.08); }
+.action-btn.sell { color: var(--amber); border-color: rgba(232, 179, 90, 0.45); }
+.action-btn.sell:hover:not(:disabled) { border-color: var(--amber); background: rgba(232, 179, 90, 0.08); }
+.action-btn.primary { color: var(--accent); border-color: var(--accent); }
+.action-btn.mini { font-size: 10px; padding: 3px 8px; color: var(--dim); }
+.action-btn.mini:hover:not(:disabled) { color: var(--accent); }
 
 .badge {
   display: inline-block;
@@ -440,8 +506,9 @@ tr.tier-row td {
   font-size: 12px;
   line-height: 1.5;
 }
-.info-block .row { display: flex; justify-content: space-between; gap: 10px; }
+.info-block .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .info-block .row span:first-child { color: var(--dim); }
+.research-btn { white-space: nowrap; }
 
 /* Formulaire d'ordre */
 #trade-form {

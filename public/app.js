@@ -7,6 +7,7 @@ const canvas = $('#map');
 const ctx = canvas.getContext('2d');
 const tooltip = $('#tooltip');
 const panel = $('#panel-content');
+const initialPanelHTML = panel.innerHTML; // accueil + légende (bouton ?)
 
 const POLL_MS = 1000;
 
@@ -90,6 +91,106 @@ async function apiPost(path, body = {}) {
   return res.json(); // les refus arrivent en { ok: false, error } — gérés par l'appelant
 }
 
+// ── Ergonomie du panneau : sections repliables + en-tête collant ──
+// Post-traitement générique appliqué après chaque rendu : chaque
+// .section-label devient un bouton qui replie tout ce qui le suit
+// (jusqu'au prochain), avec mémoire (localStorage). Les en-têtes de tier
+// des tables de marché se replient de la même façon. L'en-tête du
+// panneau (retour + titre) devient collant pour garder le contexte.
+
+const collapsePrefs = (() => {
+  try { return JSON.parse(localStorage.getItem('nx-collapse') ?? '{}'); }
+  catch { return {}; }
+})();
+
+function saveCollapsePrefs() {
+  try { localStorage.setItem('nx-collapse', JSON.stringify(collapsePrefs)); } catch { /* navigation privée */ }
+}
+
+// Clé stable d'une étiquette : on retire compteurs et ticks dynamiques.
+const collapseKey = (text) => text.toLowerCase()
+  .replace(/[\d()×/—–-]|tick/g, '').replace(/\s+/g, ' ').trim();
+
+// Repliées par défaut tant que le joueur n'a pas choisi le contraire.
+const DEFAULT_COLLAPSED = ['ateliers', 'chantier civil', 'industries investissables',
+  'bas fonds de la frange', 'commerce permanent'];
+
+function isCollapsed(key) {
+  return collapsePrefs[key] ?? DEFAULT_COLLAPSED.some((d) => key.startsWith(d));
+}
+
+function enhancePanel() {
+  // 1. En-tête collant : ← retour + titre + sous-titre regroupés.
+  if (panel.firstElementChild?.classList.contains('back-link')) {
+    const head = document.createElement('div');
+    head.className = 'panel-head';
+    while (panel.firstElementChild
+      && (panel.firstElementChild.classList.contains('back-link')
+        || panel.firstElementChild.classList.contains('panel-title')
+        || panel.firstElementChild.classList.contains('panel-sub'))) {
+      head.appendChild(panel.firstElementChild);
+    }
+    panel.prepend(head);
+  }
+
+  // 2. Sections repliables sur les .section-label de premier niveau.
+  const labels = [...panel.children].filter((el) => el.classList.contains('section-label'));
+  for (const label of labels) {
+    const key = collapseKey(label.textContent);
+    const body = document.createElement('div');
+    body.className = 'sec-body';
+    let sib = label.nextElementSibling;
+    while (sib && !sib.classList.contains('section-label') && sib.id !== 'trade-form') {
+      const next = sib.nextElementSibling;
+      body.appendChild(sib); // déplacé, les listeners sont conservés
+      sib = next;
+    }
+    label.after(body);
+    const chev = document.createElement('span');
+    chev.className = 'chev';
+    label.prepend(chev);
+    const apply = () => {
+      const closed = isCollapsed(key);
+      body.hidden = closed;
+      chev.textContent = closed ? '▸ ' : '▾ ';
+      label.classList.toggle('closed', closed);
+    };
+    apply();
+    label.classList.add('collapsible');
+    label.addEventListener('click', () => {
+      collapsePrefs[key] = !isCollapsed(key);
+      saveCollapsePrefs();
+      apply();
+    });
+  }
+
+  // 3. Tiers des tables de marché : BRUT / INTERMÉDIAIRE / FINI se
+  // replient aussi (avec le nombre de lignes masquées).
+  for (const tierRow of panel.querySelectorAll('tr.tier-row')) {
+    const td = tierRow.querySelector('td');
+    const key = 'tier:' + collapseKey(td.textContent);
+    const rows = [];
+    let r = tierRow.nextElementSibling;
+    while (r && !r.classList.contains('tier-row')) {
+      rows.push(r);
+      r = r.nextElementSibling;
+    }
+    const base = td.textContent;
+    const apply = () => {
+      const closed = collapsePrefs[key] ?? false;
+      for (const row of rows) row.hidden = closed;
+      td.textContent = `${closed ? '▸' : '▾'} ${base} (${rows.length})`;
+    };
+    apply();
+    tierRow.classList.add('collapsible');
+    tierRow.addEventListener('click', () => {
+      collapsePrefs[key] = !(collapsePrefs[key] ?? false);
+      saveCollapsePrefs();
+      apply();
+    });
+  }
+}
+
 // ── Journal ──────────────────────────────────────────────────────
 
 function log(message) {
@@ -99,6 +200,13 @@ function log(message) {
   list.prepend(li);
   while (list.children.length > 60) list.lastChild.remove();
 }
+
+// Journal repliable : un clic sur l'étiquette le réduit à une ligne.
+$('#journal-toggle').addEventListener('click', () => {
+  const j = $('#journal');
+  j.classList.toggle('folded');
+  $('#journal-chevron').textContent = j.classList.contains('folded') ? '▸' : '▾';
+});
 
 // ── Carte ────────────────────────────────────────────────────────
 
@@ -882,6 +990,7 @@ async function renderSystemPanel(sys) {
     <div id="system-planets"></div>
     <div id="system-actions"></div>
   `;
+  enhancePanel();
   bindFactionChips();
   const wrap = $('#system-planets');
   for (const p of sys.planets) {
@@ -943,9 +1052,12 @@ async function refreshPlanetPanel() {
 }
 
 // Mini-graphe de prix (60 derniers ticks) dans le formulaire d'ordre.
+// Masqué quand l'historique est trop court (pas de trou vide).
 function drawSparkline(points) {
   const c = $('#spark');
-  if (!c || points.length < 2) return;
+  if (!c) return;
+  c.hidden = points.length < 2;
+  if (c.hidden) return;
   const g = c.getContext('2d');
   const w = c.width;
   const h = c.height;
@@ -1148,8 +1260,8 @@ function renderDockedPanel(planet, market) {
             `<option value="${r.resource_id}">${r.name}</option>`).join('')}</select>
         </span></div>
         <div class="row" style="margin-top:5px"><span>
-          <input type="number" id="post-order-limit" placeholder="limite (cr)" min="0.1" step="0.1" style="width:100px;${inputStyle}">
-          <input type="number" id="post-order-flow" placeholder="u/tick" min="1" max="${post.flow}" value="${post.flow}" style="width:74px;${inputStyle}">
+          <input type="number" id="post-order-limit" placeholder="limite cr" min="0.1" step="0.1" style="width:110px;${inputStyle}">
+          <input type="number" id="post-order-flow" placeholder="u/tick" min="1" max="${post.flow}" value="${post.flow}" style="width:78px;${inputStyle}">
           <button class="action-btn" id="btn-post-order">Poser l'ordre</button>
         </span></div>
         <div style="color:var(--dim);font-size:11px;margin-top:5px">Un ordre d'achat draine le
@@ -1256,7 +1368,11 @@ function renderDockedPanel(planet, market) {
           <input type="number" id="trade-qty" min="1" step="1" value="10">
           <button class="action-btn buy" id="btn-buy">Acheter</button>
           <button class="action-btn sell" id="btn-sell">Vendre</button>
-          <button class="action-btn" id="btn-refuel" title="Remplir le réservoir au prix du marché local">Plein</button>
+        </div>
+        <div style="margin:0 0 6px">
+          <button class="action-btn mini" id="btn-max-buy" title="Quantité max achetable (soute, stock, crédits)">max achat</button>
+          <button class="action-btn mini" id="btn-max-sell" title="Tout ce que la soute contient">max vente</button>
+          <button class="action-btn mini" id="btn-refuel" title="Remplir le réservoir au prix du marché local">⛽ plein</button>
         </div>
         <div id="trade-preview"></div>
       </div>
@@ -1264,6 +1380,7 @@ function renderDockedPanel(planet, market) {
   }
 
   panel.innerHTML = html;
+  enhancePanel();
   bindBackLink();
   bindLicenceButton();
   const shipId = ship?.id;
@@ -1439,13 +1556,28 @@ function renderDockedPanel(planet, market) {
 
   if (shipHere && state.tradeSel) {
     const res = market.prices.find((r) => r.resource_id === state.tradeSel);
+    const held = cargoByRes.get(state.tradeSel)?.quantity ?? 0;
+    const space = Math.max(0, ship.cargo_capacity - ship.cargoUsed);
     $('#trade-res-name').textContent =
-      `${res.name} — marché : ${fmtPrice.format(res.price)} cr · stock ${fmtQty(res.stock)}`;
+      `${res.name} — ${fmtPrice.format(res.price)} cr · stock ${fmtQty(res.stock)}`
+      + ` · soute ${fmtQty(held)} · ${fmtQty(state.player.credits)} cr en caisse`;
     drawSparkline(market.history?.[state.tradeSel] ?? []);
     const qtyInput = $('#trade-qty');
     qtyInput.addEventListener('input', () => updateTradePreview());
     $('#btn-buy').addEventListener('click', () => doTrade('buy'));
     $('#btn-sell').addEventListener('click', () => doTrade('sell'));
+    // MAX : borné par la soute, le stock du marché et la trésorerie
+    // (marge de 5 % contre le glissement de prix).
+    $('#btn-max-buy').addEventListener('click', () => {
+      const maxBuy = Math.floor(Math.min(space, res.stock,
+        state.player.credits / (res.price * 1.05)));
+      qtyInput.value = Math.max(1, maxBuy);
+      updateTradePreview();
+    });
+    $('#btn-max-sell').addEventListener('click', () => {
+      qtyInput.value = Math.max(1, Math.floor(held));
+      updateTradePreview();
+    });
     updateTradePreview();
   }
 }
@@ -1531,6 +1663,7 @@ async function renderRemotePanel(planet, market) {
   }
 
   panel.innerHTML = html;
+  enhancePanel();
   bindBackLink();
   bindLicenceButton();
 
@@ -1627,13 +1760,21 @@ async function renderMarketsPanel() {
     const dearest = sorted[sorted.length - 1].price;
     html += `<table>
       <tr><th>Marché</th><th>Prix</th><th>Stock</th><th>Vu</th><th>Dist.</th></tr>`;
+    // Fraîcheur de la donnée : en direct (vert), récente, datée (ambre),
+    // périmée (rouge) — un prix vieux de 500 ticks ne vaut plus grand-chose.
+    const ageCell = (t) => {
+      if (t === 0) return '<td class="age-live">live</td>';
+      if (t <= 30) return `<td>${t} t</td>`;
+      if (t <= 120) return `<td class="age-mid" title="donnée datée">${t} t</td>`;
+      return `<td class="age-old" title="donnée périmée — à revérifier">${t} t</td>`;
+    };
     for (const m of sorted) {
       const cls = m.price === cheapest ? 'buy' : m.price === dearest ? 'sell' : '';
       html += `<tr class="market-row ${cls}">
         <td><span class="goto-link" data-planet="${m.planetId}" data-system="${m.systemId}">${m.planetName}</span></td>
         <td title="base ${fmtPrice.format(scan.basePrice)}">${fmtPrice.format(m.price)}</td>
         <td>${m.stock === null ? '?' : fmtQty(m.stock)}</td>
-        <td>${m.ageTicks === 0 ? 'live' : `−${m.ageTicks}t`}</td>
+        ${ageCell(m.ageTicks)}
         <td>${distOf(m) === null ? '—' : fmtQty(distOf(m)) + 'u'}</td>
       </tr>`;
     }
@@ -1645,6 +1786,7 @@ async function renderMarketsPanel() {
   }
 
   panel.innerHTML = html;
+  enhancePanel();
   $('#back-to-system').addEventListener('click', () => {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
     else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
@@ -1701,6 +1843,7 @@ async function renderObjectivesPanel() {
   }
 
   panel.innerHTML = html;
+  enhancePanel();
   $('#back-to-system').addEventListener('click', () => {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
     else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
@@ -1827,6 +1970,7 @@ async function renderHousePanel() {
     </div>`;
 
   panel.innerHTML = html;
+  enhancePanel();
   $('#back-to-system').addEventListener('click', () => {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
     else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
@@ -1867,6 +2011,12 @@ async function renderHousePanel() {
 
 $('#btn-house').addEventListener('click', renderHousePanel);
 $('#house-badge').addEventListener('click', renderHousePanel);
+
+// Aide : restaure le panneau d'accueil (légende de la carte, premiers pas).
+$('#btn-help').addEventListener('click', () => {
+  state.selectedPlanet = null;
+  panel.innerHTML = initialPanelHTML;
+});
 
 // ── Parties / sauvegardes ─────────────────────────────────────────
 
@@ -1969,6 +2119,7 @@ async function renderTechPanel() {
   }
 
   panel.innerHTML = html;
+  enhancePanel();
   $('#back-to-system').addEventListener('click', () => {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
     else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
@@ -2078,6 +2229,7 @@ async function renderRoutesPanel() {
   </div>`;
 
   panel.innerHTML = html;
+  enhancePanel();
   $('#back-to-system').addEventListener('click', () => {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
     else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
@@ -2223,6 +2375,7 @@ async function renderFactionPanel(factionId) {
   }
 
   panel.innerHTML = html;
+  enhancePanel();
   $('#back-to-system').addEventListener('click', () => {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
   });
