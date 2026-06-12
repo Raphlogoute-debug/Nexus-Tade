@@ -16,6 +16,8 @@ import { tickPiracy } from './factions/piracy.js';
 import { planShipments, processShipmentArrivals } from './factions/logistics.js';
 import { tickFleets } from './factions/fleet.js';
 import { tickContracts } from './factions/contracts.js';
+import { tickClients } from './economy/clients.js';
+import { tickPacts } from './factions/pacts.js';
 import { tickTraders } from './npc/traders.js';
 import { tickRivals } from './economy/rivals.js';
 import { tickConcessions } from './player/concession.js';
@@ -51,6 +53,8 @@ export function runTick(db) {
     tickTraders(db, tick);
     tickRivals(db, tick);
     tickContracts(db, tick);
+    tickClients(db, tick);
+    if (tick % 5 === 0) tickPacts(db, tick);
     tickConcessions(db);
     tickTradingPosts(db, tick);
     tickFleetUpkeep(db);

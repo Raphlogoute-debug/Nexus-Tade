@@ -64,8 +64,14 @@ export function tickContracts(db, tick) {
 
 // Le joueur a-t-il ses entrées auprès de cette faction ?
 export function contractAccess(db, player, factionId) {
-  if (player.prestige < C.PRESTIGE_REQUIRED) {
-    return { ok: false, error: `prestige ${C.PRESTIGE_REQUIRED} requis (vous : ${Math.floor(player.prestige)})` };
+  // Accord commercial : les seuils d'accès sont divisés par deux.
+  const pact = Boolean(db.prepare(
+    'SELECT 1 FROM faction_pacts WHERE faction_id = ?').get(factionId));
+  const mult = pact ? CONFIG.PACTS.CONTRACT_REQ_MULT : 1;
+  const prestigeReq = Math.ceil(C.PRESTIGE_REQUIRED * mult);
+  const partnersReq = Math.ceil(C.PARTNERS_REQUIRED * mult);
+  if (player.prestige < prestigeReq) {
+    return { ok: false, error: `prestige ${prestigeReq} requis (vous : ${Math.floor(player.prestige)})` };
   }
   const partners = db.prepare(
     `SELECT COUNT(*) AS n FROM trade_partners tp
@@ -73,8 +79,8 @@ export function contractAccess(db, player, factionId) {
      JOIN systems s ON s.id = p.system_id
      WHERE s.faction_id = ?`
   ).get(factionId).n;
-  if (partners < C.PARTNERS_REQUIRED) {
-    return { ok: false, error: `${C.PARTNERS_REQUIRED} partenaires commerciaux requis dans la faction (vous : ${partners})` };
+  if (partners < partnersReq) {
+    return { ok: false, error: `${partnersReq} partenaires commerciaux requis dans la faction (vous : ${partners})` };
   }
   const standing = getStanding(db, factionId);
   if (standing < CONFIG.STANDING.CONTRACT_MIN) {

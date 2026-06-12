@@ -4,7 +4,7 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 12 terminée.** Le jeu complet du marchand-puissance :
+**État actuel : Phase 13 terminée.** Le jeu complet du marchand-puissance :
 univers procédural vivant (royaumes, guerres résolues par l'économie,
 marchands PNJ, **maisons rivales** qui arbitrent et accaparent), commerce
 avec impact prix partout, industrie (concessions, ateliers, parts,
@@ -13,7 +13,9 @@ finance de guerre (prêts, contrats, contrebande), **piraterie et
 escortes**, tableau de bord du **profiteur de guerre**, objectifs jusqu'à
 la victoire « LE NEXUS », votre **maison de commerce** (blason, QG,
 classement par valeur nette), scénarios de départ, sauvegardes multiples,
-guide des premiers pas — 37 ressources, carte animée en continu.
+guide des premiers pas, **missions de vente** en trois choix, tableau de
+bord de la flotte, gisements variables, équipement, **clients réguliers**
+et accords commerciaux — 37 ressources, carte animée en continu.
 
 ## Lancer
 
@@ -29,7 +31,7 @@ création (nom + scénario + seed), chargement à chaud, suppression. Une
 ancienne `nexus-trade.db` à la racine est migrée automatiquement.
 
 ```bash
-npm run verify     # vérification bout en bout sans serveur (Phases 1 à 12)
+npm run verify     # vérification bout en bout sans serveur (Phases 1 à 13)
 npm run bench      # banc d'essai : coût d'un tick sur disque, partie chargée
 ```
 
@@ -338,6 +340,28 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   du vaisseau à chaque transaction, sons synthétiques discrets (WebAudio,
   zéro fichier, coupez avec ♪)
 
+**Phase 13 — l'empire qui se gère** (`server/economy/clients.js`,
+`server/factions/pacts.js`, équipement + gisements + tableau de bord)
+- **Tableau de bord FLOTTE** : chaque vaisseau (position, mode, soute,
+  carburant, équipement), missions en cours, routes avec leurs RECETTES
+  cumulées, contrats clients à servir — le cockpit de l'empire
+- **Gisements de qualité variable** (déterministe par seed) : ×0,6 à
+  ×2,0 d'extraction, les filons riches sont rares — la géologie
+  s'affiche avant d'acheter une concession, la prospection devient un
+  vrai choix (le monde de départ est garanti correct)
+- **Équipement des vaisseaux** : nacelles de soute (+25 %), réservoirs
+  auxiliaires (+50 %), moteurs réglés (vitesse +25 %) — un module de
+  chaque type par vaisseau, installés aux chantiers civils (T2+)
+- **Clients réguliers** : les planètes en pénurie civile durable
+  proposent des contrats d'approvisionnement à PRIX FIXÉ à la signature
+  (immunisé au glissement) ; honorer un client le FIDÉLISE — volumes et
+  primes croissants, il vous prévient quand il repasse commande ; le
+  lâcher entame sa confiance
+- **Accords commerciaux** : pacte signé avec une faction amie
+  (réputation 25 + 20 k cr) — douanes ouvertes sur ses fronts, relevés
+  gratuits dans son territoire, appels d'offres assouplis (seuils ÷2) ;
+  dénoncé si votre réputation retombe
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - En-tête : blason + nom + rang de votre maison ; bouton PARTIES (overlay
   de sauvegardes + sélecteur de scénario), panneau MAISON (identité, QG,
@@ -394,6 +418,9 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `GET /api/scenarios` | catalogue des scénarios de départ |
 | `GET /api/wars` | tableau de bord du profiteur : camps, pénuries aux capitales, fronts, revenus de guerre |
 | `POST /api/missions` · `DELETE /api/missions/:id` | missions de vente : un vaisseau libre charge, livre, vend, revient |
+| `POST /api/ships/:id/equip` | installer un module (soute, réservoir, moteurs) |
+| `POST /api/clients/:id/accept` · `/clients/:id/deliver` | contrats d'approvisionnement civils (prix fixé, fidélité) |
+| `POST /api/factions/:id/pact` | accord commercial (douanes, relevés, contrats) |
 | `GET /api/saves` · `POST /api/saves/new` · `/saves/load` · `DELETE /api/saves/:file` | gestion des parties |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |

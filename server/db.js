@@ -178,6 +178,43 @@ CREATE TABLE IF NOT EXISTS missions (
   created_tick   INTEGER NOT NULL
 );
 
+-- Équipement des vaisseaux (Phase 13) : un module de chaque type par
+-- vaisseau (l'effet est appliqué aux colonnes du vaisseau à l'achat).
+CREATE TABLE IF NOT EXISTS ship_equipment (
+  ship_id   INTEGER NOT NULL,
+  module_id TEXT NOT NULL,
+  PRIMARY KEY (ship_id, module_id)
+);
+
+-- Clients réguliers (Phase 13) : contrats d'approvisionnement civils à
+-- prix fixé à la signature. status : open (offre) | taken (signé) |
+-- done | expired.
+CREATE TABLE IF NOT EXISTS supply_contracts (
+  id           INTEGER PRIMARY KEY,
+  planet_id    INTEGER NOT NULL,
+  resource_id  TEXT NOT NULL,
+  quantity     REAL NOT NULL,
+  remaining    REAL NOT NULL,
+  unit_price   REAL NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'open',
+  created_tick INTEGER NOT NULL,
+  expires_tick INTEGER NOT NULL
+);
+
+-- Fidélité des clients : chaque contrat honoré fait grimper le niveau —
+-- volumes plus gros, primes meilleures, offres prioritaires.
+CREATE TABLE IF NOT EXISTS client_loyalty (
+  planet_id INTEGER PRIMARY KEY,
+  level     INTEGER NOT NULL DEFAULT 0,
+  completed INTEGER NOT NULL DEFAULT 0
+);
+
+-- Accords commerciaux (Phase 13) : pactes signés avec des factions amies.
+CREATE TABLE IF NOT EXISTS faction_pacts (
+  faction_id  INTEGER PRIMARY KEY,
+  signed_tick INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS player_tech (
   tech_id       TEXT PRIMARY KEY,
   acquired_tick INTEGER NOT NULL
@@ -388,6 +425,8 @@ const MIGRATIONS = [
   // Phase 12 : escorte payée pour le trajet en cours ; revenus de guerre.
   { table: 'ships', column: 'escorted', ddl: 'ALTER TABLE ships ADD COLUMN escorted INTEGER NOT NULL DEFAULT 0' },
   { table: 'player', column: 'war_profit', ddl: 'ALTER TABLE player ADD COLUMN war_profit REAL NOT NULL DEFAULT 0' },
+  // Phase 13 : recettes cumulées par route (tableau de bord de la flotte).
+  { table: 'routes', column: 'earned', ddl: 'ALTER TABLE routes ADD COLUMN earned REAL NOT NULL DEFAULT 0' },
 ];
 
 export function createDb(path) {
@@ -465,6 +504,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
+      'faction_pacts', 'client_loyalty', 'supply_contracts', 'ship_equipment',
       'missions', 'networth_history', 'rival_holdings', 'rivals',
       'objectives', 'post_orders', 'post_storage', 'trading_posts',
       'loans', 'industry_shares', 'route_stops', 'routes',

@@ -13,11 +13,33 @@ import { CONFIG } from '../config.js';
 import { RESOURCES } from '../../data/resources.js';
 import { RECIPES, recipeOutput, recipeName } from '../../data/recipes.js';
 import { BIOMES } from '../../data/biomes.js';
+import { getMeta } from '../db.js';
+import { createRng } from '../universe/rng.js';
 import { getShip, getPlayer, cargoUsed, adjustCredits, tierOf } from './state.js';
 import { hasTech, unlockedRecipes } from './tech.js';
 
 const LEVELS = CONFIG.PLAYER.CONCESSION_LEVELS;
 const FAC = CONFIG.PLAYER.FACILITIES;
+const DEP = CONFIG.PLAYER.DEPOSITS;
+
+// ── Gisements : qualité géologique d'une planète ─────────────────
+// Déterministe (seed ⊕ planète) : la même planète a toujours le même
+// filon. Biaisé vers le bas — les gisements riches sont rares, les
+// dénicher est le métier du prospecteur.
+
+export function depositQuality(db, planetId) {
+  const seed = Number(getMeta(db, 'seed')) >>> 0;
+  const rng = createRng((seed ^ (planetId * 0x9e3779b1)) >>> 0);
+  const q = DEP.MIN + Math.pow(rng.next(), DEP.SKEW) * DEP.SPAN;
+  return Math.round(q * 100) / 100;
+}
+
+export function depositLabel(quality) {
+  if (quality >= 1.7) return 'exceptionnel';
+  if (quality >= 1.3) return 'riche';
+  if (quality >= 0.8) return 'correct';
+  return 'pauvre';
+}
 
 // ── Lecture ──────────────────────────────────────────────────────
 
@@ -30,7 +52,8 @@ function enrich(db, c) {
     : hasTech(db, 'auto_warehouse') ? FAC.WAREHOUSE_TECH_MULT : 1;
   const workshopMult = hasTech(db, 'workshop_automation') ? FAC.WORKSHOP_AUTO_MULT
     : hasTech(db, 'workshop_engineering') ? FAC.WORKSHOP_ENG_MULT : 1;
-  const rate = level.rate * extractMult;
+  const quality = depositQuality(db, c.planet_id);
+  const rate = level.rate * extractMult * quality;
   const cap = level.cap * capMult;
   const storage = db.prepare(
     'SELECT resource_id, quantity FROM facility_storage WHERE concession_id = ? AND quantity > 0 ORDER BY resource_id'
@@ -38,6 +61,8 @@ function enrich(db, c) {
   return {
     ...c,
     rate: Math.round(rate * 100) / 100,
+    quality,
+    qualityLabel: depositLabel(quality),
     cap,
     nextLevelCost: next?.cost ?? null,
     used: storage.reduce((sum, s) => sum + s.quantity, 0),
@@ -214,9 +239,11 @@ export function buyConcession(db, shipId) {
       'INSERT INTO concessions (planet_id, resource_id, level) VALUES (?, ?, 1)'
     ).run(ship.planet_id, resourceId).lastInsertRowid;
   })();
+  const quality = depositQuality(db, ship.planet_id);
   return {
     ok: true, id, price, planetName: planet.name,
     resourceId, resourceName: RESOURCES[resourceId].name,
+    quality, qualityLabel: depositLabel(quality),
   };
 }
 

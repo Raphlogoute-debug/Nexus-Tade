@@ -191,6 +191,11 @@ function runAction(db, ship, action) {
           sold.push(`${Math.round(qty)} ${name(lot.resource_id)}`);
         }
       }
+      // Recettes cumulées de la route (tableau de bord de la flotte).
+      if (total > 0 && ship.route_id) {
+        db.prepare('UPDATE routes SET earned = ROUND(earned + ?, 2) WHERE id = ?')
+          .run(total, ship.route_id);
+      }
       return sold.length ? `vendu ${sold.join(' + ')} (+${Math.round(total)} cr)` : null;
     }
     case 'buy': {

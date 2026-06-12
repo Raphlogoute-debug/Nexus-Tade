@@ -330,6 +330,10 @@ main { flex: 1; display: flex; min-height: 0; }
   line-height: 1.55;
 }
 
+/* Tableau de bord de la flotte : cartes de vaisseaux. */
+.ship-card.piloted { border-color: var(--accent); }
+.ship-card .gauge { margin-bottom: 4px; }
+
 /* ── Voyage : risque pirate et escorte ─────────────────────── */
 
 .escort-opt {

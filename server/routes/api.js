@@ -41,6 +41,12 @@ import {
 } from '../player/posts.js';
 import { listObjectives } from '../player/objectives.js';
 import { createMission, cancelMission, listMissions } from '../player/missions.js';
+import { equipShip, shipEquipment } from '../player/shipyard.js';
+import { depositQuality, depositLabel } from '../player/concession.js';
+import {
+  listSupplyContracts, contractsAt, acceptSupplyContract, deliverSupplyContract,
+} from '../economy/clients.js';
+import { signPact, listPacts, pactActive } from '../factions/pacts.js';
 import { techCatalog, researchTech, unlockedRecipes, hasTech } from '../player/tech.js';
 import {
   knownMarket, knowledgeSummary, intelCost, recordIntel, systemDistance,
@@ -230,11 +236,17 @@ export function createApiRouter(db, clock) {
 
     // À quai = au moins un vaisseau de VOTRE flotte est amarré ici.
     const docked = getFleet(db).some((s) => s.planet_id === id);
+    const quality = depositQuality(db, id);
     const payload = {
       ...planet,
       biomeLabel: BIOMES[planet.biome].label,
       tier: tierOf(planet.population),
       docked,
+      // Géologie locale (pour juger une concession avant de signer) et
+      // clients : offres et contrats d'approvisionnement de cette planète.
+      depositQuality: quality,
+      depositLabel: depositLabel(quality),
+      clients: contractsAt(db, id),
     };
 
     // Les détails économiques (industries, stocks, flux) sont du
@@ -382,6 +394,7 @@ export function createApiRouter(db, clock) {
       classLabel: CONFIG.SHIPS.CLASSES[s.class]?.label ?? s.class,
       cargo: getCargo(db, s.id).map((c) => ({ ...c, name: RESOURCES[c.resource_id].name })),
       cargoUsed: cargoUsed(db, s.id),
+      equipment: shipEquipment(db, s.id),
     }));
     const concessions = listConcessions(db).map((c) => ({
       ...c,
@@ -433,6 +446,9 @@ export function createApiRouter(db, clock) {
       })(),
       investments: listInvestments(db),
       missions: listMissions(db),
+      supplyContracts: listSupplyContracts(db, 'taken'),
+      pacts: listPacts(db),
+      equipmentCatalog: CONFIG.SHIPS.EQUIPMENT,
       loans: listLoans(db),
       tradePartners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
     });
@@ -689,6 +705,37 @@ export function createApiRouter(db, clock) {
     answer(res, cancelMission(db, id));
   });
 
+  // ── Équipement des vaisseaux ────────────────────────────────────
+  router.post('/ships/:id/equip', (req, res) => {
+    const id = parseId(req.params.id);
+    const moduleId = req.body?.moduleId;
+    if (id === null || typeof moduleId !== 'string') {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, equipShip(db, id, moduleId));
+  });
+
+  // ── Clients réguliers (contrats d'approvisionnement) ────────────
+  router.post('/clients/:id/accept', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id invalide' });
+    answer(res, acceptSupplyContract(db, id));
+  });
+
+  router.post('/clients/:id/deliver', (req, res) => {
+    const id = parseId(req.params.id);
+    const shipId = parseShipId(req.body?.shipId);
+    if (id === null || shipId === null) return res.status(400).json({ error: 'paramètres invalides' });
+    answer(res, deliverSupplyContract(db, id, shipId));
+  });
+
+  // ── Accords commerciaux ─────────────────────────────────────────
+  router.post('/factions/:id/pact', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id invalide' });
+    answer(res, signPact(db, id));
+  });
+
   // ── Objectifs / fin de partie ───────────────────────────────────
   router.get('/objectives', (req, res) => {
     res.json(listObjectives(db));
@@ -902,6 +949,9 @@ export function createApiRouter(db, clock) {
     res.json({
       ...faction,
       standing: Math.round(getStanding(db, id) * 10) / 10,
+      pact: pactActive(db, id),
+      pactCost: CONFIG.PACTS.COST,
+      pactStandingRequired: CONFIG.PACTS.STANDING_REQUIRED,
       war: war && {
         enemy: factionName.get(war.attacker_id === id ? war.defender_id : war.attacker_id).name,
         since: war.started_tick,

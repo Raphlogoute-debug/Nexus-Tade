@@ -7,6 +7,8 @@ import { createRng } from '../universe/rng.js';
 import { getMeta, getCurrentTick } from '../db.js';
 import { recordFullSnapshot, recordGossipAround } from './knowledge.js';
 import { SCENARIO_BY_ID, DEFAULT_SCENARIO } from '../../data/scenarios.js';
+// Import circulaire bénin (fonctions appelées à l'exécution seulement).
+import { depositQuality } from './concession.js';
 
 const PL = CONFIG.PLAYER;
 
@@ -90,7 +92,11 @@ export function initPlayer(db, opts = {}) {
        AND biome IN ('rocky', 'volcanic', 'desert') ORDER BY id`
     ).all(PL.TIERS[2].minPop);
   }
-  const home = candidates[Math.floor(rng.next() * candidates.length)];
+  // Le filon de départ est garanti correct : on ne commence pas sur un
+  // gisement pauvre (la variance, c'est pour la prospection).
+  const decent = candidates.filter((p) => depositQuality(db, p.id) >= PL.DEPOSITS.HOME_MIN);
+  const pool = decent.length > 0 ? decent : candidates;
+  const home = pool[Math.floor(rng.next() * pool.length)];
 
   const extraction = BIOMES[home.biome].extraction;
   const resourceId = Object.entries(extraction).sort((a, b) => b[1] - a[1])[0][0];

@@ -70,6 +70,51 @@ export function tickFleetUpkeep(db) {
   return total;
 }
 
+// ── Équipement (Phase 13) : un module de chaque type par vaisseau ──
+// L'effet est appliqué immédiatement aux colonnes du vaisseau (même
+// principe que les rétrofits technologiques).
+
+export function shipEquipment(db, shipId) {
+  return db.prepare('SELECT module_id FROM ship_equipment WHERE ship_id = ?')
+    .all(shipId).map((e) => e.module_id);
+}
+
+export function equipShip(db, shipId, moduleId) {
+  const mod = SH.EQUIPMENT[moduleId];
+  if (!mod) return { ok: false, error: 'module inconnu' };
+  const ship = getShip(db, shipId);
+  if (!ship) return { ok: false, error: 'vaisseau inconnu' };
+  if (ship.planet_id === null) return { ok: false, error: 'vaisseau en transit' };
+  const pop = db.prepare('SELECT population FROM planets WHERE id = ?')
+    .get(ship.planet_id).population;
+  if (tierOf(pop) < SH.BUY_MIN_TIER) {
+    return { ok: false, error: `équipement aux chantiers civils (mondes tier ${SH.BUY_MIN_TIER}+)` };
+  }
+  if (db.prepare('SELECT 1 FROM ship_equipment WHERE ship_id = ? AND module_id = ?')
+    .get(shipId, moduleId)) {
+    return { ok: false, error: 'module déjà installé sur ce vaisseau' };
+  }
+  if (getPlayer(db).credits < mod.price) {
+    return { ok: false, error: `crédits insuffisants (${mod.price} cr)` };
+  }
+
+  const column = { cargo: 'cargo_capacity', fuel: 'fuel_capacity', speed: 'speed' }[mod.effect];
+  db.transaction(() => {
+    adjustCredits(db, -mod.price);
+    db.prepare('INSERT INTO ship_equipment (ship_id, module_id) VALUES (?, ?)')
+      .run(shipId, moduleId);
+    db.prepare(`UPDATE ships SET ${column} = ROUND(${column} * ?) WHERE id = ?`)
+      .run(mod.mult, shipId);
+    // Un réservoir agrandi est livré plein de ce qu'il avait (pas plus).
+  })();
+  const after = getShip(db, shipId);
+  return {
+    ok: true, shipName: ship.name, moduleId, label: mod.label, desc: mod.desc,
+    price: mod.price,
+    cargo: after.cargo_capacity, fuel: after.fuel_capacity, speed: after.speed,
+  };
+}
+
 export function setShipMode(db, shipId, mode) {
   if (!['manual', 'auto'].includes(mode)) return { ok: false, error: 'mode invalide (manual | auto)' };
   const ship = getShip(db, shipId);

@@ -72,6 +72,15 @@ export function recordGossipAround(db, systemId, tick) {
 // Relevé de marché acheté pour un système entier. Retourne le coût
 // (à moitié prix avec le Réseau de courtage).
 export function intelCost(db, fromSystemId, targetSystemId) {
+  // Accord commercial : le réseau d'information de la faction est à vous —
+  // relevés gratuits dans son territoire (lecture directe, pas d'import
+  // de pacts.js pour éviter un cycle).
+  const targetFaction = db.prepare('SELECT faction_id FROM systems WHERE id = ?')
+    .get(targetSystemId)?.faction_id;
+  if (targetFaction !== null && targetFaction !== undefined
+    && db.prepare('SELECT 1 FROM faction_pacts WHERE faction_id = ?').get(targetFaction)) {
+    return 0;
+  }
   const dist = systemDistance(db, fromSystemId, targetSystemId);
   const network = db.prepare(
     "SELECT 1 FROM player_tech WHERE tech_id = 'trade_network'").get();

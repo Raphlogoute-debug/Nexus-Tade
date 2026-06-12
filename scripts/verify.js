@@ -30,6 +30,12 @@ import { buyFalseFlag } from '../server/player/smuggling.js';
 import { buyPost, setPostOrder, transferPost, upgradePost, listPosts } from '../server/player/posts.js';
 import { listObjectives } from '../server/player/objectives.js';
 import { createMission } from '../server/player/missions.js';
+import { depositQuality, depositLabel } from '../server/player/concession.js';
+import { equipShip } from '../server/player/shipyard.js';
+import { tickClients, acceptSupplyContract, deliverSupplyContract, loyaltyOf } from '../server/economy/clients.js';
+import { signPact, pactActive, tickPacts } from '../server/factions/pacts.js';
+import { adjustStanding } from '../server/factions/standing.js';
+import { intelCost as intelCost13 } from '../server/player/knowledge.js';
 import { getHouse, buildHQ, upgradeHQ, hqBonuses, renownOf } from '../server/player/house.js';
 import { initRivals, tickRivals } from '../server/economy/rivals.js';
 import { statsSnapshot, netWorthBreakdown, leaderboard } from '../server/player/stats.js';
@@ -1336,6 +1342,96 @@ check(!noShip.ok && noShip.error.includes('disponible'),
   `sans vaisseau libre, la mission est refusée : « ${noShip.error} »`);
 db.prepare("UPDATE ships SET mode = 'manual' WHERE id = ?").run(flagship.id);
 
+// ── Phase 13 : gisements, équipement, clients, accords, flotte ───
+
+console.log('\n■ Phase 13 — Gisements de qualité variable\n');
+
+const q1 = depositQuality(db, 1);
+check(q1 === depositQuality(db, 1) && q1 >= 0.6 && q1 <= 2.0,
+  `qualité déterministe et bornée : planète #1 → ×${q1} (${depositLabel(q1)})`);
+const qualities = [];
+for (let pid = 1; pid <= 60; pid++) qualities.push(depositQuality(db, pid));
+check(Math.max(...qualities) - Math.min(...qualities) > 0.5,
+  `la géologie varie vraiment : ×${Math.min(...qualities).toFixed(2)} à ×${Math.max(...qualities).toFixed(2)} sur 60 planètes`);
+const cWithQuality = listConcessions(db)[0];
+check(typeof cWithQuality.quality === 'number'
+  && Math.abs(cWithQuality.rate
+    - Math.round(CONFIG.PLAYER.CONCESSION_LEVELS[cWithQuality.level - 1].rate
+      * cWithQuality.quality * (cWithQuality.rate / (CONFIG.PLAYER.CONCESSION_LEVELS[cWithQuality.level - 1].rate * cWithQuality.quality)) * 100) / 100) < 1,
+  `l'extraction applique le gisement : niv. ${cWithQuality.level}, ×${cWithQuality.quality} → ${cWithQuality.rate}/tick`);
+
+console.log('\n■ Phase 13 — Équipement des vaisseaux\n');
+
+const eqWorld = db.prepare(
+  'SELECT id FROM planets WHERE population >= ? LIMIT 1').get(CONFIG.PLAYER.TIERS[2].minPop);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(eqWorld.id, flagship.id);
+const cargoBefore13 = getShip(db, flagship.id).cargo_capacity;
+const equipped = equipShip(db, flagship.id, 'cargo_pods');
+check(equipped.ok && getShip(db, flagship.id).cargo_capacity === Math.round(cargoBefore13 * 1.25),
+  equipped.ok && `Nacelles de soute : ${cargoBefore13} → ${equipped.cargo} (+25 %)`);
+const dup = equipShip(db, flagship.id, 'cargo_pods');
+check(!dup.ok && dup.error.includes('déjà'),
+  'un module ne s\'installe qu\'une fois par vaisseau');
+
+console.log('\n■ Phase 13 — Clients réguliers\n');
+
+// Pénurie civile forcée → l'offre apparaît au tick de génération.
+const clientPlanet = db.prepare(
+  `SELECT pr.planet_id FROM planet_resources pr JOIN planets p ON p.id = pr.planet_id
+   WHERE pr.resource_id = 'synth_food' AND p.population < 50
+     AND pr.planet_id NOT IN (SELECT planet_id FROM supply_contracts)
+   LIMIT 1`).get();
+db.prepare(
+  "UPDATE planet_resources SET stock = 1 WHERE planet_id = ? AND resource_id = 'synth_food'"
+).run(clientPlanet.planet_id);
+db.prepare("UPDATE supply_contracts SET status = 'expired' WHERE status = 'open'").run();
+let offer = null;
+for (let i = 0; i < 25 && !offer; i++) {
+  runTick(db);
+  offer = db.prepare(
+    "SELECT * FROM supply_contracts WHERE planet_id = ? AND status = 'open'"
+  ).get(clientPlanet.planet_id);
+}
+check(Boolean(offer) && offer.unit_price > 0,
+  Boolean(offer) && `pénurie → offre : ${Math.round(offer.quantity)} synth_food à ${offer.unit_price} cr/u (prix fixé)`);
+
+const signed = acceptSupplyContract(db, offer.id);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(clientPlanet.planet_id, flagship.id);
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'synth_food', ?, 5)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = ?`
+).run(flagship.id, offer.quantity + 10, offer.quantity + 10);
+const creditsBeforeClient = getPlayer(db).credits;
+const delivered = deliverSupplyContract(db, offer.id, flagship.id);
+check(signed.ok && delivered.ok && delivered.done
+  && Math.abs(getPlayer(db).credits - creditsBeforeClient - delivered.paid) < 1,
+  delivered.ok && `contrat honoré d'une traite : +${Math.round(delivered.paid)} cr au prix du contrat`);
+check(loyaltyOf(db, clientPlanet.planet_id).level === 1,
+  `le client se fidélise : niveau ${loyaltyOf(db, clientPlanet.planet_id).level}`);
+
+console.log('\n■ Phase 13 — Accords commerciaux\n');
+
+const pactFaction = allFactions.find((f) => getStanding(db, f.id) > -10) ?? allFactions[0];
+adjustStanding(db, pactFaction.id, 100); // amitié de test
+db.prepare('UPDATE player SET credits = 100000 WHERE id = 1').run();
+const pact = signPact(db, pactFaction.id);
+check(pact.ok && pactActive(db, pactFaction.id),
+  pact.ok && `accord signé avec ${pact.factionName} (${fmt(pact.cost)} cr)`);
+const pactSystem = db.prepare('SELECT id FROM systems WHERE faction_id = ? LIMIT 1').get(pactFaction.id);
+const homeSystem13 = db.prepare('SELECT system_id FROM planets WHERE id = ?')
+  .get(listConcessions(db)[0].planet_id).system_id;
+check(intelCost13(db, homeSystem13, pactSystem.id) === 0,
+  'relevés gratuits dans le territoire allié');
+adjustStanding(db, pactFaction.id, -200); // trahison
+tickPacts(db, getCurrentTick(db));
+check(!pactActive(db, pactFaction.id),
+  'la réputation effondrée dénonce le pacte automatiquement');
+
+console.log('\n■ Phase 13 — Recettes par route\n');
+
+check(db.pragma('table_info(routes)').some((c) => c.name === 'earned'),
+  'les routes tracent leurs recettes cumulées (tableau de bord de la flotte)');
+
 console.log('\n■ Phase 11 — Scénarios de départ\n');
 
 // Un scénario alternatif applique bien ses paramètres (sur une DB neuve).
@@ -1364,7 +1460,8 @@ dbHeir.close();
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 12 vérifiées : économie, guerres, flotte, industrie, routes, '
+  : '\n✓ Phases 1 à 13 vérifiées : économie, guerres, flotte, industrie, routes, '
     + 'investissements, prêts, contrebande, comptoirs, objectifs, maison/QG, rivaux, '
-    + 'scénarios, piraterie/escortes et revenus de guerre OK\n');
+    + 'scénarios, piraterie/escortes, revenus de guerre, missions, gisements, '
+    + 'équipement, clients et accords OK\n');
 process.exit(failures ? 1 : 0);

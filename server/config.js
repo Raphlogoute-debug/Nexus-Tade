@@ -174,6 +174,17 @@ export const CONFIG = {
     // Garde-fou du bouton « avancer jusqu'à l'arrivée ».
     SKIP_MAX_TICKS: 200,
 
+    // Gisements (Phase 13) : toutes les planètes ne se valent pas. La
+    // qualité du gisement (déterministe par seed + planète) multiplie
+    // l'extraction de la concession — prospecter pour dénicher le bon
+    // filon devient un vrai choix. Le monde de départ est garanti correct.
+    DEPOSITS: {
+      MIN: 0.6,
+      SPAN: 1.4,        // qualité ∈ [0.6 ; 2.0], biaisée vers le bas
+      SKEW: 1.6,        // exposant : les filons riches sont rares
+      HOME_MIN: 1.0,    // plancher du monde de départ
+    },
+
     // Maison de commerce (Phase 11) : votre identité. Le rang de renom
     // découle du prestige (purement cosmétique, mais c'est le fil rouge).
     HOUSE: {
@@ -366,6 +377,50 @@ export const CONFIG = {
     MAX_FLEET: 100,  // garde-fou purement technique
     NAMES: ['Le Colporteur', 'La Fortune', 'Le Tenace', "L'Opportun", 'Le Frugal',
       'La Comète', "L'Habile", 'Le Discret'],
+
+    // Équipement (Phase 13) : un module de chaque type par vaisseau,
+    // installé aux chantiers civils (mondes T2+). L'effet modifie le
+    // vaisseau immédiatement et pour de bon.
+    EQUIPMENT: {
+      cargo_pods: { label: 'Nacelles de soute', effect: 'cargo', mult: 1.25, price: 8000,
+        desc: 'soute +25 %' },
+      fuel_tanks: { label: 'Réservoirs auxiliaires', effect: 'fuel', mult: 1.5, price: 6000,
+        desc: 'réservoir +50 %' },
+      tuned_drives: { label: 'Moteurs réglés', effect: 'speed', mult: 1.25, price: 10000,
+        desc: 'vitesse +25 %' },
+    },
+  },
+
+  // Clients réguliers (Phase 13) : des planètes civiles en manque durable
+  // proposent des contrats d'approvisionnement à PRIX FIXÉ à la signature
+  // (immunisé au glissement — votre propre livraison n'écrase pas votre
+  // prix). Honorer un client le fidélise : il revient avec des volumes
+  // plus gros et de meilleures primes.
+  CLIENTS: {
+    RESOURCES: ['synth_food', 'water', 'meds', 'consumer_goods', 'fuel'],
+    CHECK_EVERY: 10,        // cadence de génération des offres (ticks)
+    PRESSURE_MIN: 0.5,      // pénurie requise : stock < 50 % de la cible
+    MAX_OPEN: 6,            // offres simultanées dans la galaxie
+    QTY_BASE: 250,          // volume de base (× population, × fidélité)
+    QTY_PER_LOYALTY: 0.35,  // +35 % de volume par niveau de fidélité
+    PREMIUM: 1.15,          // prix signé = prix courant × prime
+    PREMIUM_PER_LOYALTY: 0.03, // +3 %/niveau, plafonné
+    PREMIUM_MAX: 1.3,
+    OFFER_TTL: 60,          // une offre non signée expire (ticks)
+    CONTRACT_TTL: 120,      // un contrat signé doit être honoré en N ticks
+    MAX_TAKEN: 3,           // contrats signés simultanés
+    PRESTIGE_DONE: 40,      // prestige par contrat honoré
+  },
+
+  // Accords commerciaux (Phase 13) : un pacte signé avec une faction
+  // amie. Bénéfices : douanes ouvertes sur ses fronts (plus de saisies),
+  // relevés gratuits dans son territoire, accès aux appels d'offres
+  // assoupli. Rompu automatiquement si votre réputation retombe.
+  PACTS: {
+    COST: 20000,
+    STANDING_REQUIRED: 25,  // réputation pour signer
+    STANDING_FLOOR: 10,     // en dessous, le pacte est dénoncé
+    CONTRACT_REQ_MULT: 0.5, // seuils des contrats de faction × 0,5
   },
 
   // Vaisseaux en mode automatique : même logique gloutonne que les

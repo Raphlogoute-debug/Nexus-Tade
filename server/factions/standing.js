@@ -6,6 +6,8 @@
 import { CONFIG } from '../config.js';
 import { logEvent } from '../events.js';
 import { warContext } from './war.js';
+// Import circulaire bénin (appels à l'exécution seulement).
+import { pactActive } from './pacts.js';
 
 const S = CONFIG.STANDING;
 const STRATEGIC = new Set(Object.keys(CONFIG.FLEET.BUILD));
@@ -91,6 +93,7 @@ export function maybeSeizeCargo(db, tick, ship, planetId) {
      FROM planets p JOIN systems s ON s.id = p.system_id WHERE p.id = ?`
   ).get(planetId);
   if (info.faction_id === null) return null;
+  if (pactActive(db, info.faction_id)) return null; // accord : douanes ouvertes
 
   const ctx = warContext(db);
   if (!ctx.frontSystems.has(info.system_id)) return null;

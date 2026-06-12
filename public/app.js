@@ -1231,13 +1231,19 @@ function renderDockedPanel(planet, market) {
   // et la navette automatique en un clic depuis une concession.
   html += '<div id="best-outlet"></div>';
 
+  // Clients : offres d'approvisionnement et contrats signés ici.
+  html += clientsSectionHtml(planet);
+
   // Industrie : votre concession sur cette planète (ou son achat).
   const c = state.player.concessions.find((x) => x.planet_id === planet.id);
   if (c) {
     const pct = Math.round((c.used / c.cap) * 100);
+    const qCls = c.quality >= 1.3 ? 'price-low' : c.quality < 0.8 ? 'price-high' : '';
     html += `
-      <div class="section-label">Concession — extraction ${c.resourceName} (niv. ${c.level})</div>
+      <div class="section-label">Concession — ${c.resourceName} (niv. ${c.level})</div>
       <div class="info-block">
+        <div class="row"><span>Gisement</span>
+          <span class="${qCls}">${c.qualityLabel} ×${fmtNum.format(c.quality)}</span></div>
         <div class="row"><span>Extraction</span><span>+${fmtNum.format(c.rate)}/tick</span></div>
         <div class="row"><span>Entrepôt</span><span>${fmtQty(c.used)} / ${fmtQty(c.cap)} (${pct} %)</span></div>
         <div class="gauge"><div style="width:${pct}%"></div></div>
@@ -1295,8 +1301,13 @@ function renderDockedPanel(planet, market) {
       }
     }
   } else if (shipHere && state.player.concessions.length < state.player.maxConcessions) {
+    const dq = planet.depositQuality ?? 1;
+    const dqCls = dq >= 1.3 ? 'price-low' : dq < 0.8 ? 'price-high' : '';
     html += `
       <div class="section-label">Industrie</div>
+      <div class="industry">Gisement local :
+        <span class="${dqCls}">${planet.depositLabel} ×${fmtNum.format(dq)}</span>
+        <span class="io">— la prospection paie : les filons riches sont rares</span></div>
       <button class="action-btn" id="btn-buy-concession">
         Acheter une concession ici (${fmtQty(state.player.nextConcessionPrice)} cr — Prospection requise)
       </button>
@@ -1696,6 +1707,7 @@ function renderDockedPanel(planet, market) {
 
   fillBestOutlet(planet, market); // suggestion de débouché (asynchrone)
   bindMissionSection(planet); // formulaire « vendre la production »
+  bindClientsSection(); // offres et livraisons clients
 }
 
 // Le conseiller commercial : pour la plus grosse cargaison en soute, le
@@ -1871,6 +1883,75 @@ async function bindMissionSection(planet) {
   });
 }
 
+// — Clients réguliers : offres et contrats d'approvisionnement ————
+// Une planète en pénurie durable propose un contrat à prix FIXÉ à la
+// signature ; l'honorer fidélise le client (volumes et primes croissants).
+
+function clientsSectionHtml(planet) {
+  const clients = planet.clients ?? [];
+  if (clients.length === 0) return '';
+  let html = `<div class="section-label">Clients — approvisionnement</div>`;
+  for (const sc of clients) {
+    if (sc.status === 'open') {
+      html += `<div class="info-block">
+        <div class="row"><span>📦 Demande : ${fmtQty(sc.quantity)} ${sc.resourceName}</span>
+          <span class="price-low">${fmtPrice.format(sc.unit_price)} cr/u fixé</span></div>
+        <div class="row"><span style="color:var(--dim)">offre valable jusqu'au tick ${sc.expires_tick}${
+          sc.loyalty > 0 ? ` · client fidèle (niv. ${sc.loyalty})` : ''}</span>
+          <span><button class="action-btn primary accept-client" data-id="${sc.id}">Signer</button></span></div>
+        <div style="color:var(--dim);font-size:11px;margin-top:4px">Prix garanti à la signature —
+          vos livraisons ne l'écrasent pas. Un client honoré revient, plus gros.</div>
+      </div>`;
+    } else {
+      const ship = selectedShip();
+      const here = ship?.planet_id === planet.id;
+      const held = (ship?.cargo ?? []).find((l) => l.resource_id === sc.resource_id)?.quantity ?? 0;
+      html += `<div class="info-block" style="border-left:3px solid var(--green)">
+        <div class="row"><span>📦 Contrat signé : ${sc.resourceName}</span>
+          <span>${fmtQty(sc.remaining)}/${fmtQty(sc.quantity)} restants</span></div>
+        <div class="row"><span style="color:var(--dim)">à ${fmtPrice.format(sc.unit_price)} cr/u ·
+          avant le tick ${sc.expires_tick}</span>
+          <span><button class="action-btn deliver-client" data-id="${sc.id}"
+            ${here && held > 0 ? '' : 'disabled'}
+            title="${here ? (held > 0 ? '' : 'rien de tel en soute') : 'amarrez un vaisseau ici'}">
+            Livrer depuis la soute</button></span></div>
+      </div>`;
+    }
+  }
+  return html;
+}
+
+function bindClientsSection() {
+  for (const btn of panel.querySelectorAll('.accept-client')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/clients/${btn.dataset.id}/accept`);
+      if (r.ok) {
+        toast(`Contrat signé : ${fmtQty(r.quantity)} ${r.resourceName} pour ${r.planetName}`, 'good');
+        log(`Client : ${r.planetName} — ${fmtQty(r.quantity)} ${r.resourceName} à ${fmtPrice.format(r.unitPrice)} cr/u (avant t${r.deadline})`);
+      } else {
+        log(`Signature impossible : ${r.error}`);
+      }
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+  for (const btn of panel.querySelectorAll('.deliver-client')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/clients/${btn.dataset.id}/deliver`, { shipId: selectedShip()?.id });
+      if (r.ok) {
+        log(`Livraison : ${fmtQty(r.delivered)} ${r.resourceName} à ${r.planetName} (+${fmtPrice.format(r.paid)} cr)`
+          + (r.done ? ` · client honoré, fidélité ${r.loyalty}` : ''));
+        if (r.done) { toast(`Client honoré : ${r.planetName} (fidélité ${r.loyalty})`, 'good'); playSound('objective'); }
+        else playSound('sell');
+      } else {
+        log(`Livraison impossible : ${r.error}`);
+      }
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+}
+
 // Re-rendu forcé (ignore le garde-fou « input actif »).
 async function refreshPlanetPanelForce() {
   const active = document.activeElement;
@@ -1943,6 +2024,9 @@ async function renderRemotePanel(planet, market) {
   const myConcession = state.player.concessions.find((x) => x.planet_id === planet.id);
   if (myConcession) html += missionSectionHtml(planet, myConcession);
 
+  // Offres clients de cette planète (visibles aussi de loin).
+  html += clientsSectionHtml(planet);
+
   if (!market.known) {
     html += `<p class="hint">Marché inconnu — aucune donnée. Rapprochez-vous,
       ou achetez un relevé depuis la vue système.</p>`;
@@ -1975,6 +2059,7 @@ async function renderRemotePanel(planet, market) {
   bindBackLink();
   bindLicenceButton();
   if (myConcession) bindMissionSection(planet);
+  bindClientsSection();
 
   // Bouton voyage (préparé en asynchrone) — pour le vaisseau piloté.
   const ship = selectedShip();
@@ -2260,6 +2345,157 @@ async function renderWarsPanel() {
 }
 
 $('#btn-wars').addEventListener('click', renderWarsPanel);
+
+// ── Panneau : tableau de bord de la flotte ────────────────────────
+// Le cockpit de l'empire : chaque vaisseau (où, quoi, plein, équipé),
+// les missions en cours, les routes et leurs recettes, les clients.
+
+function shipWhereabouts(ship) {
+  if (ship.planet_id !== null) {
+    const entry = state.planetIndex.get(ship.planet_id);
+    return { label: `à quai — ${entry.planet.name}`, free: ship.mode === 'manual' };
+  }
+  const dest = state.planetIndex.get(ship.dest_planet_id);
+  return {
+    label: `en vol → ${dest.planet.name} (t${ship.arrival_tick})${ship.escorted ? ' 🛡' : ''}`,
+    free: false,
+  };
+}
+
+async function renderFleetPanel() {
+  const routes = await api('/routes');
+  state.selectedPlanet = null;
+  const p = state.player;
+  const ships = p.ships ?? [];
+  const freeCount = ships.filter((s) => s.mode === 'manual' && s.planet_id !== null).length;
+  const catalog = p.equipmentCatalog ?? {};
+
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title">Flotte — ${ships.length}/${p.maxFleet}</h2>
+    <p class="panel-sub">${freeCount} disponible${freeCount > 1 ? 's' : ''} ·
+      entretien ${fmtNum.format(p.fleetUpkeep)} cr/tick</p>
+  `;
+
+  html += `<div class="section-label">Vaisseaux (${ships.length})</div>`;
+  for (const ship of ships) {
+    const where = shipWhereabouts(ship);
+    const cargoPct = Math.round((ship.cargoUsed / ship.cargo_capacity) * 100);
+    const fuelPct = Math.round((ship.fuel / ship.fuel_capacity) * 100);
+    const modeBadge = ship.mode === 'route' ? '<span class="badge live">ROUTE</span>'
+      : ship.mode === 'auto' ? '<span class="badge live">AUTO</span>'
+        : ship.mode === 'mission' ? '<span class="badge age">MISSION</span>'
+          : where.free ? '<span class="badge">disponible</span>' : '<span class="badge">MAN</span>';
+    const isPiloted = ship.id === selectedShip()?.id;
+    const topCargo = (ship.cargo ?? [])[0];
+
+    html += `<div class="info-block ship-card ${isPiloted ? 'piloted' : ''}">
+      <div class="row"><span><strong>${ship.false_flag ? '⚑ ' : ''}${ship.name}</strong>
+        <span style="color:var(--dim)">· ${ship.classLabel}</span> ${modeBadge}</span>
+        <span>${isPiloted ? '<span class="badge live">PILOTÉ</span>'
+          : `<button class="action-btn mini pilot-btn" data-ship="${ship.id}">piloter</button>`}</span></div>
+      <div class="row"><span>${where.label}</span><span></span></div>
+      <div class="row"><span>Soute ${fmtQty(ship.cargoUsed)}/${fmtQty(ship.cargo_capacity)}${
+        topCargo ? ` <span style="color:var(--dim)">(${topCargo.name}…)</span>` : ''}</span>
+        <span>⛽ ${fuelPct} %</span></div>
+      <div class="gauge"><div style="width:${cargoPct}%"></div></div>
+      <div style="margin-top:5px">`;
+    for (const [modId, mod] of Object.entries(catalog)) {
+      const installed = (ship.equipment ?? []).includes(modId);
+      html += installed
+        ? `<span class="badge live" title="${mod.label}">${mod.desc}</span> `
+        : `<button class="action-btn mini equip-btn" data-ship="${ship.id}" data-mod="${modId}"
+            title="${mod.label} — installation aux chantiers civils (T2+), vaisseau à quai"
+            ${p.credits < mod.price ? 'disabled' : ''}>+ ${mod.desc} (${fmtQty(mod.price)} cr)</button> `;
+    }
+    html += `</div></div>`;
+  }
+
+  // Missions en cours (toutes concessions confondues).
+  const missions = p.missions ?? [];
+  html += `<div class="section-label">Missions de vente (${missions.length})</div>`;
+  if (missions.length === 0) {
+    html += `<div class="industry io">Aucune — lancez-en depuis vos concessions (« Vendre la production »)</div>`;
+  }
+  for (const m of missions) {
+    html += `<div class="industry">🚀 ${m.ship_name} : ${m.resourceName} → ${m.to_name}
+      <span class="io">— reste ${fmtQty(m.quantity)}${m.carrying > 0 ? `, soute ${fmtQty(m.carrying)}` : ''}</span>
+      <button class="action-btn mini cancel-mission" data-id="${m.id}">✕</button></div>`;
+  }
+
+  // Routes et leurs recettes cumulées.
+  html += `<div class="section-label">Routes (${routes.length})</div>`;
+  if (routes.length === 0) {
+    html += `<div class="industry io">Aucune — « 🔁 navette auto » depuis une concession, ou le bouton ROUTES</div>`;
+  }
+  for (const r of routes) {
+    html += `<div class="industry">${r.name}
+      <span class="io">— ${r.ships.map((s) => s.name).join(', ') || 'aucun vaisseau'} ·
+      ${r.stops.length} étapes</span>
+      <span class="price-low">+${fmtQty(Math.round(r.earned ?? 0))} cr</span></div>`;
+  }
+
+  // Contrats clients signés.
+  const clients = p.supplyContracts ?? [];
+  html += `<div class="section-label">Clients à servir (${clients.length})</div>`;
+  if (clients.length === 0) {
+    html += `<div class="industry io">Aucun contrat signé — les offres apparaissent sur les
+      planètes en pénurie (et vos fidèles vous préviennent)</div>`;
+  }
+  for (const sc of clients) {
+    html += `<div class="industry">📦 <span class="goto-link" data-planet="${sc.planet_id}"
+        data-system="${sc.systemId}">${sc.planetName}</span> :
+      ${fmtQty(sc.remaining)}/${fmtQty(sc.quantity)} ${sc.resourceName}
+      <span class="io">— ${fmtPrice.format(sc.unit_price)} cr/u fixé · avant t${sc.expires_tick}${
+        sc.loyalty > 0 ? ` · fidélité ${sc.loyalty}` : ''}</span></div>`;
+  }
+
+  panel.innerHTML = html;
+  enhancePanel();
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+  for (const btn of panel.querySelectorAll('.pilot-btn')) {
+    btn.addEventListener('click', () => {
+      state.selectedShipId = Number(btn.dataset.ship);
+      renderFleetBar();
+      renderHudPlayer();
+      renderFleetPanel();
+    });
+  }
+  for (const btn of panel.querySelectorAll('.equip-btn')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/ships/${btn.dataset.ship}/equip`, { moduleId: btn.dataset.mod });
+      if (r.ok) {
+        toast(`${r.shipName} : ${r.label} installé (${r.desc})`, 'good');
+        playSound('objective');
+        log(`${r.shipName} équipé — ${r.label} (−${fmtQty(r.price)} cr)`);
+      } else {
+        log(`Installation impossible : ${r.error}`);
+      }
+      await refreshPlayerAndKnowledge();
+      renderFleetPanel();
+    });
+  }
+  for (const btn of panel.querySelectorAll('.cancel-mission')) {
+    btn.addEventListener('click', async () => {
+      const r = await fetch(`/api/missions/${btn.dataset.id}`, { method: 'DELETE' })
+        .then((x) => x.json());
+      log(r.ok ? `Mission annulée — ${r.shipName} repasse en manuel` : `Annulation : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      renderFleetPanel();
+    });
+  }
+  for (const link of panel.querySelectorAll('.goto-link')) {
+    link.addEventListener('click', () => {
+      const sys = state.universe.systems.find((s) => s.id === Number(link.dataset.system));
+      if (sys) { selectSystem(sys); selectPlanet(Number(link.dataset.planet)); }
+    });
+  }
+}
+
+$('#btn-fleet').addEventListener('click', renderFleetPanel);
 
 // ── Maison de commerce : identité, QG, classement, statistiques ───
 
@@ -2822,6 +3058,27 @@ async function renderFactionPanel(factionId) {
     </div>
   `;
 
+  // Accord commercial : la loyauté qui paie.
+  html += `<div class="section-label">Accord commercial</div>`;
+  if (f.pact) {
+    html += `<div class="info-block" style="border-left:3px solid ${f.color}">
+      <strong>Accord en vigueur</strong>
+      <div style="color:var(--dim);margin-top:4px;line-height:1.5">Douanes ouvertes sur leurs
+        fronts (aucune saisie) · relevés gratuits dans leur territoire · appels d'offres
+        assouplis (seuils ÷2). Rompu si votre réputation tombe sous 10.</div>
+    </div>`;
+  } else {
+    html += `<div class="info-block">
+      <div class="row"><span>Réputation ${f.pactStandingRequired} requise</span>
+        <span><button class="action-btn" id="btn-pact"
+          ${f.standing >= f.pactStandingRequired ? '' : 'disabled'}
+          title="Douanes ouvertes, relevés gratuits chez eux, appels d'offres assouplis — rompu si la réputation retombe">
+          Signer (${fmtQty(f.pactCost)} cr)</button></span></div>
+      <div style="color:var(--dim);font-size:11px;margin-top:4px">Vendez-leur, honorez leurs
+        contrats — la réputation monte, l'accord s'ouvre.</div>
+    </div>`;
+  }
+
   if (f.war) {
     const myLoans = (state.player.loans ?? [])
       .filter((l) => l.faction_id === f.id && l.status === 'open');
@@ -2889,6 +3146,18 @@ async function renderFactionPanel(factionId) {
   enhancePanel();
   $('#back-to-system').addEventListener('click', () => {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+  });
+  $('#btn-pact')?.addEventListener('click', async () => {
+    const r = await apiPost(`/factions/${f.id}/pact`);
+    if (r.ok) {
+      toast(`Accord commercial signé avec ${r.factionName}`, 'good');
+      playSound('objective');
+      log(`Accord commercial avec ${r.factionName} (−${fmtQty(r.cost)} cr) — douanes ouvertes, relevés gratuits`);
+    } else {
+      log(`Accord refusé : ${r.error}`);
+    }
+    await refreshPlayerAndKnowledge();
+    renderFactionPanel(factionId);
   });
   $('#btn-loan')?.addEventListener('click', async () => {
     const amount = Number($('#loan-amount').value);
@@ -3059,6 +3328,10 @@ async function pollEvents() {
       else if (e.type === 'piracy' || e.type === 'seizure') { toast(e.message, 'bad'); playSound('alert'); toasted++; }
       else if (e.type === 'rival') { toast(e.message, 'warn'); toasted++; }
       else if (e.type === 'peace') { toast(e.message, 'info'); toasted++; }
+      else if (e.type === 'client') { toast(e.message, 'good'); toasted++; }
+      else if (e.type === 'pact' && e.message.includes('DÉNONCÉ')) {
+        toast(e.message, 'bad'); playSound('alert'); toasted++;
+      }
       else if (e.type === 'loan' && e.message.includes('rembourse')) {
         toast(e.message, 'good'); playSound('sell'); toasted++;
       }
