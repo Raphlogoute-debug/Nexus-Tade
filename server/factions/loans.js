@@ -79,6 +79,9 @@ export function resolveWarLoans(db, war, result, tick) {
       .run(payout > 0 ? 'repaid' : 'defaulted', payout, loan.id);
     if (payout > 0) {
       adjustCredits(db, payout);
+      // Les intérêts perçus sont du pur profit de guerre.
+      db.prepare('UPDATE player SET war_profit = ROUND(war_profit + ?, 2) WHERE id = 1')
+        .run(Math.max(0, payout - loan.amount));
       logEvent(db, tick, 'loan',
         `FINANCE — ${faction.name} rembourse votre prêt de guerre : +${payout} cr`,
         loan.faction_id);

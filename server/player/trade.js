@@ -135,7 +135,7 @@ export function executeTrade(db, { side, resourceId, quantity, shipId }) {
     if (ship.false_flag) {
       onFlaggedTrade(db, tick, ship, planet.faction_id, resourceId);
     } else if (side === 'sell') {
-      standingShift = onPlayerSale(db, tick, planet.faction_id, resourceId, quantity);
+      standingShift = onPlayerSale(db, tick, planet.faction_id, resourceId, quantity, executed.total);
     }
 
     recordFullSnapshot(db, planet.id, tick); // on voit ce qu'on vient de faire

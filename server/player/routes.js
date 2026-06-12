@@ -153,7 +153,7 @@ function tryDepart(db, ship, destPlanetId, tick) {
   if (fresh.fuel < fresh.fuel_capacity * CONFIG.AUTOMATION.REFUEL_BELOW) {
     refuel(db, undefined, ship.id);
   }
-  startTravel(db, destPlanetId, tick, ship.id); // échec (découvert…) → on réessaie au tick suivant
+  startTravel(db, destPlanetId, tick, ship.id, 'auto'); // échec (découvert…) → on réessaie au tick suivant
 }
 
 // Exécute une action ; retourne un résumé lisible, ou null si rien bougé.

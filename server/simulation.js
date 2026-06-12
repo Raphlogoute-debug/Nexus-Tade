@@ -12,6 +12,7 @@ import { runTick as runEconomyTick } from './economy/engine.js';
 import { tickNeeds } from './economy/needs.js';
 import { tickDiplomacy } from './factions/diplomacy.js';
 import { tickWars, warContext } from './factions/war.js';
+import { tickPiracy } from './factions/piracy.js';
 import { planShipments, processShipmentArrivals } from './factions/logistics.js';
 import { tickFleets } from './factions/fleet.js';
 import { tickContracts } from './factions/contracts.js';
@@ -54,6 +55,7 @@ export function runTick(db) {
     tickFleetUpkeep(db);
     tickAutoShips(db, tick);
     tickRouteShips(db, tick);
+    tickPiracy(db, tick); // les abordages frappent avant l'amarrage
     events = processArrivals(db, tick);
     if (tick % 5 === 0) checkObjectives(db, tick);
     if (tick % 50 === 0) pruneEvents(db);

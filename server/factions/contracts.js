@@ -136,6 +136,10 @@ export function deliverContract(db, contractId, shipId) {
       contract.deliver_planet_id, contract.resource_id);
 
     adjustCredits(db, paid);
+    // Livrer un belligérant, c'est du revenu de guerre (score du profiteur).
+    if (warContext(db).factionWar.has(contract.faction_id)) {
+      db.prepare('UPDATE player SET war_profit = ROUND(war_profit + ?, 2) WHERE id = 1').run(paid);
+    }
     db.prepare(
       `UPDATE contracts SET remaining = ROUND(remaining - ?, 2),
         status = CASE WHEN remaining - ? <= 0 THEN 'done' ELSE 'open' END WHERE id = ?`

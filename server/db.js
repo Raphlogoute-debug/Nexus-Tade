@@ -371,6 +371,9 @@ const MIGRATIONS = [
   { table: 'player', column: 'house_color', ddl: 'ALTER TABLE player ADD COLUMN house_color TEXT' },
   { table: 'player', column: 'hq_planet_id', ddl: 'ALTER TABLE player ADD COLUMN hq_planet_id INTEGER' },
   { table: 'player', column: 'hq_level', ddl: 'ALTER TABLE player ADD COLUMN hq_level INTEGER NOT NULL DEFAULT 0' },
+  // Phase 12 : escorte payée pour le trajet en cours ; revenus de guerre.
+  { table: 'ships', column: 'escorted', ddl: 'ALTER TABLE ships ADD COLUMN escorted INTEGER NOT NULL DEFAULT 0' },
+  { table: 'player', column: 'war_profit', ddl: 'ALTER TABLE player ADD COLUMN war_profit REAL NOT NULL DEFAULT 0' },
 ];
 
 export function createDb(path) {

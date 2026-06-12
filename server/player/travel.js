@@ -3,9 +3,10 @@
 // trajet — les prix vus au départ ne sont pas garantis à l'arrivée.
 
 import { CONFIG } from '../config.js';
-import { getShip, getPlayer } from './state.js';
+import { getShip, getPlayer, adjustCredits } from './state.js';
 import { systemDistance, recordFullSnapshot, recordGossipAround } from './knowledge.js';
 import { maybeSeizeCargo } from '../factions/standing.js';
+import { routeDanger, dangerLabel, escortCost } from '../factions/piracy.js';
 
 const SHIP = CONFIG.PLAYER.SHIP;
 
@@ -38,25 +39,46 @@ export function previewTravel(db, destPlanetId, shipId) {
   if (fuelCost > ship.fuel) {
     return { ok: false, error: 'carburant insuffisant', distance, ticks, fuelCost, fuel: ship.fuel };
   }
-  return { ok: true, distance, ticks, fuelCost, originSystem, destSystem: dest.system_id };
+
+  // Risque pirate du trajet, et prix de l'escorte qui l'annule.
+  const danger = routeDanger(db, originSystem, dest.system_id);
+  return {
+    ok: true, distance, ticks, fuelCost, originSystem, destSystem: dest.system_id,
+    danger, dangerLabel: dangerLabel(danger), escortCost: escortCost(distance),
+  };
 }
 
-export function startTravel(db, destPlanetId, currentTick, shipId) {
+// escort : true (payée, refus si crédits insuffisants), false (à vos
+// risques), ou 'auto' — les capitaines en pilotage automatique paient
+// l'escorte en zone dangereuse quand la trésorerie le permet.
+export function startTravel(db, destPlanetId, currentTick, shipId, escort = false) {
   const preview = previewTravel(db, destPlanetId, shipId);
   if (!preview.ok) return preview;
 
-  const ship = getShip(db, shipId);
-  db.prepare(
-    `UPDATE ships SET
-       planet_id = NULL,
-       origin_system_id = ?, dest_system_id = ?, dest_planet_id = ?,
-       departure_tick = ?, arrival_tick = ?,
-       fuel = fuel - ?
-     WHERE id = ?`
-  ).run(preview.originSystem, preview.destSystem, destPlanetId,
-    currentTick, currentTick + preview.ticks, preview.fuelCost, ship.id);
+  if (escort === 'auto') {
+    escort = preview.danger >= CONFIG.PIRACY.CHANCE_FRINGE
+      && getPlayer(db).credits >= preview.escortCost;
+  } else if (escort && getPlayer(db).credits < preview.escortCost) {
+    return { ok: false, error: `escorte à ${preview.escortCost} cr — crédits insuffisants` };
+  }
 
-  return { ok: true, arrivalTick: currentTick + preview.ticks, ...preview };
+  const ship = getShip(db, shipId);
+  db.transaction(() => {
+    if (escort) adjustCredits(db, -preview.escortCost);
+    db.prepare(
+      `UPDATE ships SET
+         planet_id = NULL,
+         origin_system_id = ?, dest_system_id = ?, dest_planet_id = ?,
+         departure_tick = ?, arrival_tick = ?,
+         fuel = fuel - ?, escorted = ?
+       WHERE id = ?`
+    ).run(preview.originSystem, preview.destSystem, destPlanetId,
+      currentTick, currentTick + preview.ticks, preview.fuelCost, escort ? 1 : 0, ship.id);
+  })();
+
+  return {
+    ok: true, arrivalTick: currentTick + preview.ticks, escorted: Boolean(escort), ...preview,
+  };
 }
 
 // Amarre les vaisseaux arrivés à destination. À quai : instantané complet
@@ -74,7 +96,7 @@ export function processArrivals(db, tick) {
       `UPDATE ships SET
          planet_id = dest_planet_id,
          origin_system_id = NULL, dest_system_id = NULL, dest_planet_id = NULL,
-         departure_tick = NULL, arrival_tick = NULL
+         departure_tick = NULL, arrival_tick = NULL, escorted = 0
        WHERE id = ?`
     ).run(ship.id);
 

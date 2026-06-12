@@ -305,6 +305,35 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   active sans redémarrer) ; création avec nom + scénario + seed
   optionnelle ; l'ancien `nexus-trade.db` est migré en première sauvegarde
 
+**Phase 12 — le risque, le profit de guerre et la main tendue**
+(`server/factions/piracy.js`, guide + jus côté client)
+- **Piraterie** : chaque tick de transit, un vaisseau non escorté risque
+  l'abordage selon l'espace traversé — royaume ~0,4 %/tick, Frange 5 %,
+  front de guerre 9 %. Abordé : 30 % de chaque cargaison raflés (rançon
+  si la soute est vide). Les marchands PNJ subissent le même monde
+- **Escortes** : payées au départ (base + distance), elles sanctuarisent
+  le trajet ; case cochée par défaut quand le trajet est risqué, danger
+  affiché (« ☠ risque élevé sans escorte », infobulles de la carte).
+  Les vaisseaux en pilotage automatique paient l'escorte d'eux-mêmes en
+  zone dangereuse quand la trésorerie le permet (capitaines prudents)
+- **Tableau de bord GUERRES** (le bouton s'embrase quand la galaxie
+  brûle) : pour chaque guerre, les deux camps — flotte restante,
+  disponibilité, votre réputation, créances et appels d'offres — et
+  surtout leurs **pénuries stratégiques à la capitale** (prix vs base,
+  jusqu'à ×5) : l'écran du profiteur. Vendez aux deux camps, prêtez,
+  livrez les contrats — et que la guerre dure
+- **Revenus de guerre** : compteur dédié (ventes stratégiques aux
+  belligérants + contrats en guerre + intérêts de prêts), affiché dans
+  GUERRES et les statistiques
+- **Guide des premiers pas** : une barre qui dit QUOI faire maintenant
+  (6 étapes : charger → comparer → voyager → vendre → réinvestir →
+  objectifs), validée sur l'état réel de la partie, bouton visé qui
+  pulse, progression par sauvegarde, désactivable d'un clic
+- **Le jus** : toasts pour les grands moments (objectif, guerre,
+  abordage, accaparement rival, prêt remboursé), crédits qui s'envolent
+  du vaisseau à chaque transaction, sons synthétiques discrets (WebAudio,
+  zéro fichier, coupez avec ♪)
+
 **UI** (`public/`, vanilla, zéro dépendance)
 - En-tête : blason + nom + rang de votre maison ; bouton PARTIES (overlay
   de sauvegardes + sélecteur de scénario), panneau MAISON (identité, QG,
@@ -359,6 +388,7 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `POST /api/hq/build` · `/hq/upgrade` | bâtir / améliorer le quartier général |
 | `GET /api/stats` | valeur nette, patrimoine, classement des maisons, historique |
 | `GET /api/scenarios` | catalogue des scénarios de départ |
+| `GET /api/wars` | tableau de bord du profiteur : camps, pénuries aux capitales, fronts, revenus de guerre |
 | `GET /api/saves` · `POST /api/saves/new` · `/saves/load` · `DELETE /api/saves/:file` | gestion des parties |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |
@@ -423,14 +453,13 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
   prix vivants seulement), voisinages stellaires précalculés et scans
   partagés pour les PNJ et la flotte.
 
-## Reste à faire (Phase 12+)
+## Reste à faire (Phase 13+)
 
-- Contrôle des routes : piraterie qui intercepte les convois, escortes,
-  points de passage stratégiques à sécuriser
-- Profit de guerre approfondi : embargos à exploiter/contourner, ventes
-  d'armes aux deux camps avec conséquences
+- Embargos formels à exploiter/contourner (au-delà des listes noires et
+  saisies actuelles) ; blocus de systèmes
 - Maisons rivales plus agressives : comptoirs et QG visibles, rachats,
-  guerres de prix ciblées contre le joueur
+  guerres de prix ciblées contre le joueur ; pirates organisés (repaires
+  à raser ou soudoyer)
 - Ressources exotiques ultra-rares par biome ; équilibrage global après
   sessions de jeu réelles
 - SSE à la place du polling ; état de simulation en mémoire si un jour

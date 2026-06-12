@@ -28,12 +28,17 @@ export function allStandings(db) {
 }
 
 // Appelé après chaque VENTE du joueur. Hors guerre, le commerce est neutre ;
-// en guerre, les livraisons stratégiques engagent.
-export function onPlayerSale(db, tick, planetFactionId, resourceId, quantity) {
+// en guerre, les livraisons stratégiques engagent — et comptent dans vos
+// revenus de guerre (le score du profiteur).
+export function onPlayerSale(db, tick, planetFactionId, resourceId, quantity, total = 0) {
   if (planetFactionId === null || !STRATEGIC.has(resourceId)) return null;
   const ctx = warContext(db);
   const enemyId = ctx.enemyOf(planetFactionId);
   if (enemyId === null) return null;
+
+  if (total > 0) {
+    db.prepare('UPDATE player SET war_profit = ROUND(war_profit + ?, 2) WHERE id = 1').run(total);
+  }
 
   const gain = Math.round(quantity * S.STRATEGIC_PER_UNIT * 10) / 10;
   adjustStanding(db, planetFactionId, gain);

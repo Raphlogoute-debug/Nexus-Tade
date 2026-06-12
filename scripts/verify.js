@@ -1187,6 +1187,104 @@ const snap = statsSnapshot(db);
 check(snap.counts.fleet >= 1 && typeof snap.rank === 'number' && Array.isArray(snap.leaderboard),
   'snapshot complet (valeur nette, rang, compteurs, historique) servi à l\'UI');
 
+// ── Phase 12 : piraterie, escortes et profits de guerre ──────────
+
+console.log('\n■ Phase 12 — Piraterie et escortes\n');
+
+// Un trajet vers la Frange est risqué ; l'escorte a un prix ; le trajet
+// escorté est sanctuarisé même quand l'abordage est rendu certain.
+const pirateDest = db.prepare(
+  `SELECT p.id FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id IS NULL AND p.id != ? LIMIT 1`
+).get(flagship.planet_id ?? 0);
+db.prepare('UPDATE ships SET planet_id = ?, fuel = fuel_capacity WHERE id = ?')
+  .run(listConcessions(db)[0].planet_id, flagship.id);
+const riskPreview = previewTravel(db, pirateDest.id, flagship.id);
+check(riskPreview.ok && riskPreview.danger >= CONFIG.PIRACY.CHANCE_FRINGE
+  && riskPreview.dangerLabel !== 'faible' && riskPreview.escortCost > 0,
+  riskPreview.ok && `trajet vers la Frange : risque « ${riskPreview.dangerLabel} », escorte à ${fmt(riskPreview.escortCost)} cr`);
+
+// Cargaison à bord + abordage certain (chance forcée à 1) sans escorte.
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'iron_ore', 100, 1)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 100`
+).run(flagship.id);
+const creditsPrePirate = getPlayer(db).credits;
+const goRisky = startTravel(db, pirateDest.id, getCurrentTick(db), flagship.id, false);
+const savedChances = { ...CONFIG.PIRACY };
+CONFIG.PIRACY.CHANCE_FRINGE = 1;
+CONFIG.PIRACY.CHANCE_FRONT = 1;
+CONFIG.PIRACY.CHANCE_CORE = 1;
+runTick(db);
+CONFIG.PIRACY.CHANCE_FRINGE = savedChances.CHANCE_FRINGE;
+CONFIG.PIRACY.CHANCE_FRONT = savedChances.CHANCE_FRONT;
+CONFIG.PIRACY.CHANCE_CORE = savedChances.CHANCE_CORE;
+const cargoAfterRaid = db.prepare(
+  "SELECT quantity FROM ship_cargo WHERE ship_id = ? AND resource_id = 'iron_ore'"
+).get(flagship.id).quantity;
+check(goRisky.ok && !goRisky.escorted && cargoAfterRaid < 100,
+  `abordage sans escorte : cargaison 100 → ${cargoAfterRaid.toFixed(0)} (les pirates raflent ${Math.round(CONFIG.PIRACY.CARGO_LOSS * 100)} %)`);
+check(db.prepare("SELECT COUNT(*) AS n FROM world_events WHERE type = 'piracy'").get().n >= 1,
+  'l\'abordage est annoncé au journal');
+
+// Retour au bercail, puis trajet ESCORTÉ sous abordage certain : intact.
+while (getShip(db, flagship.id).planet_id === null) runTick(db);
+db.prepare('UPDATE ships SET planet_id = ?, fuel = fuel_capacity WHERE id = ?')
+  .run(listConcessions(db)[0].planet_id, flagship.id);
+db.prepare(
+  "UPDATE ship_cargo SET quantity = 80 WHERE ship_id = ? AND resource_id = 'iron_ore'"
+).run(flagship.id);
+const goEscorted = startTravel(db, pirateDest.id, getCurrentTick(db), flagship.id, true);
+CONFIG.PIRACY.CHANCE_FRINGE = 1;
+CONFIG.PIRACY.CHANCE_FRONT = 1;
+CONFIG.PIRACY.CHANCE_CORE = 1;
+runTick(db);
+CONFIG.PIRACY.CHANCE_FRINGE = savedChances.CHANCE_FRINGE;
+CONFIG.PIRACY.CHANCE_FRONT = savedChances.CHANCE_FRONT;
+CONFIG.PIRACY.CHANCE_CORE = savedChances.CHANCE_CORE;
+const cargoEscorted = db.prepare(
+  "SELECT quantity FROM ship_cargo WHERE ship_id = ? AND resource_id = 'iron_ore'"
+).get(flagship.id).quantity;
+check(goEscorted.ok && goEscorted.escorted && cargoEscorted === 80,
+  `trajet escorté (−${fmt(goEscorted.escortCost)} cr) : cargaison intacte sous abordage certain`);
+
+console.log('\n■ Phase 12 — Revenus de guerre\n');
+
+// Une vente STRATÉGIQUE à un belligérant doit nourrir le compteur de
+// revenus de guerre (le score du profiteur). On s'assure d'une guerre
+// en cours et d'une faction qui ne nous a pas sur liste noire.
+const allFactions = db.prepare('SELECT * FROM factions ORDER BY id').all();
+const ctx12 = warContext(db);
+let warFaction = allFactions.find((f) =>
+  ctx12.factionWar.has(f.id) && getStanding(db, f.id) > CONFIG.STANDING.BLACKLIST);
+if (!warFaction) {
+  const candidates = allFactions.filter((f) =>
+    !ctx12.factionWar.has(f.id) && getStanding(db, f.id) > CONFIG.STANDING.BLACKLIST);
+  declareWar(db, getCurrentTick(db), candidates[0], candidates[1]);
+  warFaction = candidates[0];
+}
+const warPlanet12 = db.prepare(
+  `SELECT p.id FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE s.faction_id = ? LIMIT 1`
+).get(warFaction.id);
+db.prepare('UPDATE ships SET planet_id = ?, false_flag = 0 WHERE id = ?')
+  .run(warPlanet12.id, flagship.id);
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'ship_modules', 60, 10)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 60, avg_cost = 10`
+).run(flagship.id);
+const wpBefore = getPlayer(db).war_profit ?? 0;
+const strategicSale = executeTrade(db,
+  { side: 'sell', resourceId: 'ship_modules', quantity: 50, shipId: flagship.id });
+const wpAfter = getPlayer(db).war_profit ?? 0;
+check(strategicSale.ok && wpAfter > wpBefore,
+  strategicSale.ok && `vendre 50 modules à ${warFaction.name} (en guerre) crédite les revenus de guerre :`
+  + ` ${fmt(wpBefore)} → ${fmt(wpAfter)} cr`);
+
+// Le tableau de bord /api/wars expose les pénuries des DEUX camps.
+const warsCtx = warContext(db);
+check(warsCtx.wars.length >= 1, `${warsCtx.wars.length} guerre(s) en cours pour le tableau de bord`);
+
 console.log('\n■ Phase 11 — Scénarios de départ\n');
 
 // Un scénario alternatif applique bien ses paramètres (sur une DB neuve).
@@ -1215,6 +1313,7 @@ dbHeir.close();
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 11 vérifiées : économie, guerres, flotte, industrie, routes, '
-    + 'investissements, prêts, contrebande, comptoirs, objectifs, maison/QG, rivaux et scénarios OK\n');
+  : '\n✓ Phases 1 à 12 vérifiées : économie, guerres, flotte, industrie, routes, '
+    + 'investissements, prêts, contrebande, comptoirs, objectifs, maison/QG, rivaux, '
+    + 'scénarios, piraterie/escortes et revenus de guerre OK\n');
 process.exit(failures ? 1 : 0);

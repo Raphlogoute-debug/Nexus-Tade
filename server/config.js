@@ -255,6 +255,25 @@ export const CONFIG = {
     READINESS_EMA: 0.05,    // la disponibilité suit l'entretien réellement payé
   },
 
+  // Piraterie : le risque du transport. Chaque tick de transit, un
+  // vaisseau non escorté risque l'abordage selon l'espace traversé —
+  // l'espace policé d'un royaume est presque sûr, la Frange grouille,
+  // les fronts de guerre attirent les charognards. Une escorte payée au
+  // départ annule le risque du trajet. Les marchands PNJ subissent le
+  // même monde (écrémage statistique).
+  PIRACY: {
+    CHANCE_CORE: 0.004,   // espace d'un royaume (par tick de transit)
+    CHANCE_FRINGE: 0.05,  // la Frange, sans faction
+    CHANCE_FRONT: 0.09,   // système sur un front de guerre
+    CARGO_LOSS: 0.3,      // part de chaque cargaison raflée par abordage
+    RANSOM_RATE: 0.04,    // soute vide : rançon (part des crédits)
+    RANSOM_MAX: 3000,
+    RANSOM_MIN: 100,
+    ESCORT_FLAT: 120,     // prix d'une escorte : base + distance
+    ESCORT_PER_DIST: 0.5,
+    TRADER_CHANCE: 0.012, // les PNJ aussi se font rançonner
+  },
+
   // Marchands indépendants (agents pleins) : ils font le même métier que
   // le joueur, sur les mêmes marchés, avec les mêmes règles d'impact prix.
   // Maisons de commerce rivales (Phase 11) : des concurrents nommés, qui

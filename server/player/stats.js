@@ -92,6 +92,7 @@ export function statsSnapshot(db) {
   return {
     netWorth: netWorthBreakdown(db),
     renown: renownOf(player.prestige),
+    warProfit: player.war_profit ?? 0,
     rank: board.find((e) => e.isPlayer)?.rank ?? 1,
     field: board.length,
     leaderboard: board,

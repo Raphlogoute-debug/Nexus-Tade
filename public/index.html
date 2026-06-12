@@ -31,6 +31,7 @@
     <button id="btn-tech" class="time-btn nav-btn" title="Arbre technologique">TECH</button>
     <button id="btn-routes" class="time-btn nav-btn" title="Routes logistiques">ROUTES</button>
     <button id="btn-markets" class="time-btn nav-btn" title="Comparateur de marchés / arbitrage">MARCHÉS</button>
+    <button id="btn-wars" class="time-btn nav-btn" title="Tableau de bord du profiteur de guerre">GUERRES</button>
     <button id="btn-objectives" class="time-btn nav-btn" title="Jalons de carrière et victoire">OBJECTIFS</button>
     <button id="btn-house" class="time-btn nav-btn" title="Maison de commerce, QG, classement">MAISON</button>
     <button id="btn-help" class="time-btn nav-btn" title="Aide et légende de la carte">?</button>
@@ -45,6 +46,12 @@
 
   <div id="fleet-bar"></div>
   <div id="alerts-bar" hidden></div>
+  <div id="guide-bar" hidden>
+    <span class="guide-icon">🧭</span>
+    <span id="guide-text"></span>
+    <span id="guide-step" class="guide-count"></span>
+    <button id="guide-skip" title="Masquer le guide définitivement">passer ✕</button>
+  </div>
 
   <main>
     <aside id="panel">
@@ -81,8 +88,10 @@
         <button id="zoom-fit" title="Voir toute la galaxie">⛶</button>
         <button id="zoom-ship" title="Centrer sur le vaisseau piloté">◎</button>
         <button id="traffic-toggle" title="Afficher / masquer le trafic (convois et marchands)">trafic</button>
+        <button id="mute-toggle" title="Couper / remettre les sons">♪</button>
       </div>
       <div id="map-hint">molette : zoom · glisser : déplacer · clic : sélectionner</div>
+      <div id="toasts"></div>
     </section>
   </main>
 

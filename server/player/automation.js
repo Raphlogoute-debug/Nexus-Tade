@@ -74,7 +74,7 @@ export function tickAutoShips(db, tick) {
       // refusé (équipages impayés : on écoule pour renflouer la caisse).
       let sellHere = here && extraElsewhere <= 0;
       if (!sellHere && best.planet_id !== ship.planet_id) {
-        const trip = startTravel(db, best.planet_id, tick, ship.id);
+        const trip = startTravel(db, best.planet_id, tick, ship.id, 'auto');
         if (!trip.ok && here) sellHere = true;
       }
       if (sellHere) {
@@ -121,13 +121,13 @@ export function tickAutoShips(db, tick) {
         logEvent(db, tick, 'fleet',
           `FLOTTE — ${ship.name} charge ${best.qty} ${best.resourceId}`
           + ` à ${buy.unitPrice} cr/u, cap sur un marché à ${Math.round(dist(best.dest))} u`);
-        startTravel(db, best.dest.planet_id, tick, ship.id);
+        startTravel(db, best.dest.planet_id, tick, ship.id, 'auto');
       }
     } else if (Math.random() < A.WANDER_P && markets.length > 0) {
       // Rien d'intéressant : on va prospecter ailleurs (et rafraîchir
       // votre connaissance des marchés au passage).
       const target = markets[Math.floor(Math.random() * markets.length)];
-      if (target.planet_id !== ship.planet_id) startTravel(db, target.planet_id, tick, ship.id);
+      if (target.planet_id !== ship.planet_id) startTravel(db, target.planet_id, tick, ship.id, 'auto');
     }
   }
 }

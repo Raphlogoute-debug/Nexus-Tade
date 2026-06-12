@@ -189,6 +189,81 @@ function enhancePanel() {
       apply();
     });
   }
+
+  // Le guide pointe peut-être un bouton qui vient d'apparaître.
+  updateGuide();
+}
+
+// ── Le jus : sons, toasts, texte flottant ─────────────────────────
+// Les grands moments se voient et s'entendent. Sons synthétiques
+// (WebAudio, zéro fichier), toasts en haut à droite de la carte, et
+// crédits qui s'envolent du vaisseau à chaque transaction.
+
+let audioCtx = null;
+let muted = false;
+try { muted = localStorage.getItem('nx-muted') === '1'; } catch { /* privé */ }
+
+function playSound(kind) {
+  if (muted) return;
+  try {
+    audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t0 = audioCtx.currentTime;
+    const tone = (freq, start, dur, type = 'sine', gain = 0.07) => {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type;
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0, t0 + start);
+      g.gain.linearRampToValueAtTime(gain, t0 + start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(t0 + start);
+      o.stop(t0 + start + dur + 0.05);
+    };
+    if (kind === 'sell') { tone(660, 0, 0.1); tone(880, 0.08, 0.15); }
+    else if (kind === 'buy') { tone(440, 0, 0.09, 'sine', 0.05); }
+    else if (kind === 'objective') { tone(523, 0, 0.14); tone(659, 0.11, 0.14); tone(784, 0.22, 0.28); }
+    else if (kind === 'alert') { tone(233, 0, 0.2, 'square', 0.045); tone(185, 0.16, 0.26, 'square', 0.045); }
+    else if (kind === 'war') { tone(196, 0, 0.35, 'sawtooth', 0.04); tone(147, 0.18, 0.4, 'sawtooth', 0.04); }
+  } catch { /* pas d'audio : tant pis, le jeu reste muet */ }
+}
+
+function toast(message, kind = 'info') {
+  const box = $('#toasts');
+  if (!box) return;
+  while (box.children.length >= 4) box.firstChild.remove();
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.textContent = message;
+  box.appendChild(el);
+  setTimeout(() => el.classList.add('out'), 4600);
+  setTimeout(() => el.remove(), 5200);
+}
+
+// Texte flottant sur la carte (coordonnées carte) : monte et s'efface.
+state.floaters = [];
+
+function addFloater(x, y, text, color) {
+  state.floaters.push({ x, y, text, color, born: performance.now() });
+}
+
+function drawFloaters() {
+  if (state.floaters.length === 0) return;
+  const now = performance.now();
+  ctx.font = 'bold 13px ui-monospace, Menlo, Consolas, monospace';
+  ctx.textAlign = 'center';
+  state.floaters = state.floaters.filter((f) => {
+    const age = (now - f.born) / 1000;
+    if (age > 2) return false;
+    const [sx, sy] = toScreen(f.x, f.y);
+    ctx.globalAlpha = Math.max(0, 1 - age / 2);
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, sx, sy - 14 - age * 22);
+    return true;
+  });
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
 }
 
 // ── Journal ──────────────────────────────────────────────────────
@@ -772,6 +847,7 @@ function drawMap(t = performance.now() / 1000) {
   drawSystems(t);
   drawPlayerAssets();
   drawFleet(t);
+  drawFloaters();
 }
 
 let renderLoopStarted = false;
@@ -902,13 +978,16 @@ canvas.addEventListener('mousemove', (e) => {
     const age = state.knowledge.get(sys.id);
     const info = age === undefined ? 'marchés inconnus'
       : age === 0 ? 'données fraîches' : `données : il y a ${age} ticks`;
-    const front = state.fronts.has(sys.id) ? '<br>⚔ FRONT DE GUERRE' : '';
+    const danger = state.fronts.has(sys.id)
+      ? '<br><span style="color:#f04545">⚔ FRONT DE GUERRE — risque pirate extrême</span>'
+      : sys.faction_id === null
+        ? '<br><span style="color:#e8b35a">☠ zone pirate (Frange) — escorte conseillée</span>' : '';
     const f = sys.faction_id !== null ? state.factionById.get(sys.faction_id) : null;
     const pop = sys.planets.reduce((sum, p) => sum + p.population, 0);
     tooltip.hidden = false;
     tooltip.innerHTML = `<strong>${sys.name}</strong> — ${sys.planets.length} planètes · ${formatPop(pop)}<br>`
       + (f ? `<span style="color:${f.color}">◆ ${f.name}</span>` : '<span style="color:#6b7689">◇ Frange indépendante</span>')
-      + ` · ${info}${front}`;
+      + ` · ${info}${danger}`;
     tooltip.style.left = `${e.clientX - rect.left + 14}px`;
     tooltip.style.top = `${e.clientY - rect.top - 8}px`;
   } else {
@@ -950,6 +1029,13 @@ $('#traffic-toggle').addEventListener('click', (e) => {
   state.showTraffic = !state.showTraffic;
   e.currentTarget.classList.toggle('off', !state.showTraffic);
 });
+$('#mute-toggle').addEventListener('click', (e) => {
+  muted = !muted;
+  try { localStorage.setItem('nx-muted', muted ? '1' : '0'); } catch { /* privé */ }
+  e.currentTarget.classList.toggle('off', muted);
+  if (!muted) playSound('buy');
+});
+if (muted) $('#mute-toggle').classList.add('off');
 
 // ── Panneau : système ────────────────────────────────────────────
 
@@ -1621,6 +1707,20 @@ async function doTrade(side) {
     const verb = side === 'buy' ? 'Achat' : 'Vente';
     log(`${verb} : ${fmtQty(r.quantity)} × ${fmtPrice.format(r.unitPrice)} = ${fmtPrice.format(r.total)} cr`
       + (r.prestigeGained > 0 ? ` · +${fmtNum.format(r.prestigeGained)} prestige` : ''));
+    // Le jus : la transaction se voit et s'entend.
+    const pos = shipMapPosition(selectedShip());
+    if (pos) {
+      addFloater(pos.x, pos.y,
+        side === 'sell' ? `+${fmtQty(r.total)} cr` : `−${fmtQty(r.total)} cr`,
+        side === 'sell' ? '#5fd68b' : '#8fa1b8');
+    }
+    playSound(side === 'sell' ? 'sell' : 'buy');
+    if (side === 'sell') {
+      state.guideFlags.soldOnce = true;
+      if (r.prestigeGained >= 15) {
+        toast(`Belle affaire : +${fmtQty(r.total)} cr · +${fmtNum.format(r.prestigeGained)} prestige`, 'good');
+      }
+    }
   } else {
     log(`Ordre refusé : ${r.error}`);
   }
@@ -1673,18 +1773,29 @@ async function renderRemotePanel(planet, market) {
   const slot = $('#travel-slot');
   if (!slot || state.selectedPlanet !== planet.id) return;
   if (preview.ok) {
+    // Risque pirate du trajet : visible, et annulable par une escorte.
+    const dangerous = preview.dangerLabel !== 'faible';
+    const riskLine = dangerous
+      ? `<label class="escort-opt" title="L'escorte annule tout risque d'abordage sur ce trajet">
+           <input type="checkbox" id="travel-escort" checked>
+           escorte ${fmtInt.format(preview.escortCost)} cr
+           <span class="danger ${preview.dangerLabel === 'extrême' ? 'crit' : ''}">☠ risque ${preview.dangerLabel} sans escorte</span>
+         </label>`
+      : `<div class="escort-opt dim" title="Espace policé — une attaque reste improbable">trajet en espace sûr</div>`;
     slot.innerHTML = `
-      <button class="action-btn" id="btn-travel">
+      <button class="action-btn primary" id="btn-travel">
         ${ship.name} : voyager — ${preview.ticks} tick${preview.ticks > 1 ? 's' : ''} ·
         ${preview.fuelCost > 0 ? `${fmtInt.format(preview.fuelCost)} carburant` : 'saut local'}
       </button>
+      ${riskLine}
     `;
     $('#btn-travel').addEventListener('click', async () => {
-      const r = await apiPost('/travel', { planetId: planet.id, shipId: ship.id });
+      const escort = Boolean($('#travel-escort')?.checked);
+      const r = await apiPost('/travel', { planetId: planet.id, shipId: ship.id, escort });
       if (r.ok) {
-        log(`En route vers ${planet.name} — arrivée au tick ${r.arrivalTick}`);
+        log(`En route vers ${planet.name} — arrivée au tick ${r.arrivalTick}`
+          + (r.escorted ? ` · sous escorte (−${fmtInt.format(r.escortCost)} cr)` : ''));
         await refreshPlayerAndKnowledge();
-        drawMap();
         renderHudPlayer();
         refreshPlanetPanelForce();
       } else {
@@ -1728,6 +1839,7 @@ $('#heat-off').addEventListener('click', () => {
 
 async function renderMarketsPanel() {
   state.selectedPlanet = null;
+  state.guideFlags.sawMarkets = true;
   const scan = await api(`/market-scan/${state.marketSel}`);
   const ship = selectedShip();
   const origin = ship?.planet_id != null ? state.planetIndex.get(ship.planet_id)?.system : null;
@@ -1816,6 +1928,7 @@ $('#btn-markets').addEventListener('click', renderMarketsPanel);
 async function renderObjectivesPanel() {
   const objectives = await api('/objectives');
   state.selectedPlanet = null;
+  state.guideFlags.sawObjectives = true;
 
   const doneCount = objectives.filter((o) => o.done).length;
   let html = `
@@ -1851,6 +1964,93 @@ async function renderObjectivesPanel() {
 }
 
 $('#btn-objectives').addEventListener('click', renderObjectivesPanel);
+
+// ── Panneau : guerres — le tableau de bord du profiteur ──────────
+
+async function renderWarsPanel() {
+  const data = await api('/wars');
+  state.selectedPlanet = null;
+
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title">⚔ Guerres</h2>
+    <p class="panel-sub">Revenus de guerre cumulés :
+      <span class="price-low">${fmtQty(data.warProfit)} cr</span>
+      — ventes stratégiques aux belligérants, contrats et intérêts de prêts.</p>
+  `;
+
+  if (data.wars.length === 0) {
+    html += `<div class="info-block">La galaxie est en paix. Ça ne durera pas —
+      surveillez la diplomatie (panneaux de faction) : une guerre est le
+      meilleur client d'un marchand.</div>`;
+  } else {
+    html += `<div class="info-block" style="border-color:var(--amber)">
+      <strong>L'art du profiteur</strong> : chaque camp paie ses pénuries au
+      prix fort à sa capitale. Vendez aux DEUX — l'acheteur vous adore,
+      son ennemi finit par l'apprendre (réputation). Prêtez au futur
+      vainqueur, livrez les contrats, et que la guerre dure.</div>`;
+  }
+
+  for (const war of data.wars) {
+    html += `<div class="section-label">⚔ ${war.attacker.name} contre ${war.defender.name}
+      — depuis t${war.since}</div>`;
+    for (const side of [war.attacker, war.defender]) {
+      const fleetPct = Math.max(0, Math.min(100, Math.round((side.fleet / (side.fleet0 || 1)) * 100)));
+      const standingCls = side.standing > 5 ? 'price-low' : side.standing < -5 ? 'price-high' : '';
+      html += `
+        <div class="info-block" style="border-left:3px solid ${side.color}">
+          <div class="row"><span><strong style="color:${side.color}">${side.name}</strong></span>
+            <span><button class="action-btn mini goto-faction" data-faction="${side.id}">fiche</button></span></div>
+          <div class="row"><span>Flotte</span><span>${fmtInt.format(side.fleet)} / ${fmtInt.format(side.fleet0)} (${fleetPct} %) · dispo ${Math.round(side.readiness * 100)} %</span></div>
+          <div class="gauge"><div style="width:${fleetPct}%;background:${side.color}"></div></div>
+          <div class="row"><span>Votre réputation</span><span class="${standingCls}">${side.standing > 0 ? '+' : ''}${side.standing}</span></div>
+          ${side.openLoans > 0 ? `<div class="row"><span>Vos créances</span><span>${fmtQty(side.openLoans)} cr (×1,3 si victoire)</span></div>` : ''}
+          ${side.contracts > 0 ? `<div class="row"><span>Appels d'offres ouverts</span><span class="price-low">${side.contracts}</span></div>` : ''}
+          <div class="row" style="margin-top:5px"><span>Pénuries — <span class="goto-link" data-planet="${side.capitalPlanetId}" data-system="${side.capitalSystemId}">${side.capitalName}</span></span><span></span></div>
+          ${side.shortages.slice(0, 3).map((s) => `
+            <div class="row"><span>${s.name}</span>
+              <span class="${s.ratio >= 1.5 ? 'price-high' : ''}">${fmtPrice.format(s.price)} cr
+                <span class="badge ${s.ratio >= 1.5 ? 'age' : ''}">×${s.ratio.toFixed(1)}</span></span></div>`).join('')}
+        </div>
+      `;
+    }
+    if (war.fronts.length > 0) {
+      html += `<div class="industry io">Fronts : ${war.fronts.map((f) =>
+        `<span class="goto-sys" data-system="${f.system_id}">${f.name}</span>`).join(' · ')}
+        — douanes nerveuses, saisies de matériel stratégique si vous êtes mal vu</div>`;
+    }
+  }
+
+  panel.innerHTML = html;
+  enhancePanel();
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+  for (const btn of panel.querySelectorAll('.goto-faction')) {
+    btn.addEventListener('click', () => renderFactionPanel(Number(btn.dataset.faction)));
+  }
+  for (const link of panel.querySelectorAll('.goto-link')) {
+    link.addEventListener('click', () => {
+      const sys = state.universe.systems.find((s) => s.id === Number(link.dataset.system));
+      if (sys) { selectSystem(sys); selectPlanet(Number(link.dataset.planet)); }
+    });
+  }
+  for (const link of panel.querySelectorAll('.goto-sys')) {
+    link.addEventListener('click', () => {
+      const sys = state.universe.systems.find((s) => s.id === Number(link.dataset.system));
+      if (sys) {
+        selectSystem(sys);
+        state.view.cx = sys.x;
+        state.view.cy = sys.y;
+        if (state.view.zoom < 2) state.view.zoom = 2;
+        clampView();
+      }
+    });
+  }
+}
+
+$('#btn-wars').addEventListener('click', renderWarsPanel);
 
 // ── Maison de commerce : identité, QG, classement, statistiques ───
 
@@ -2016,6 +2216,110 @@ $('#house-badge').addEventListener('click', renderHousePanel);
 $('#btn-help').addEventListener('click', () => {
   state.selectedPlanet = null;
   panel.innerHTML = initialPanelHTML;
+});
+
+// ── Guide des premiers pas ────────────────────────────────────────
+// La main tendue des 5 premières minutes : une barre qui dit QUOI faire
+// maintenant, étape par étape, en lisant l'état réel de la partie. Chaque
+// étape valide la précédente ; le bouton visé pulse quand il est visible.
+// Progression mémorisée par partie (seed) ; « passer » l'éteint pour de bon.
+
+const GUIDE_STEPS = [
+  {
+    // Valide quand une soute contient quelque chose.
+    text: 'Votre concession extrait du minerai. Sur votre planète, dépliez '
+      + '« Concession » et cliquez « → soute » pour charger votre vaisseau.',
+    target: '.collect-btn',
+    done: () => (state.player?.ships ?? []).some((s) => s.cargoUsed > 0),
+  },
+  {
+    text: 'Cargaison chargée. Ouvrez MARCHÉS (en haut) : il liste les prix '
+      + 'connus de votre minerai — repérez où il se vend plus cher.',
+    target: '#btn-markets',
+    done: () => state.guideFlags.sawMarkets,
+  },
+  {
+    text: 'Choisissez une planète plus offrante (clic sur son nom), puis '
+      + '« voyager ». Hors des royaumes, payez l\'escorte — les pirates rôdent.',
+    target: '#btn-travel',
+    done: () => (state.player?.ships ?? []).some((s) => s.planet_id === null),
+  },
+  {
+    text: 'En vol… À l\'arrivée, cliquez votre minerai dans le marché puis '
+      + 'VENDRE (bouton « max vente » pour tout écouler). Le profit fait le prestige.',
+    target: '#btn-sell',
+    done: () => state.guideFlags.soldOnce,
+  },
+  {
+    text: 'Premier profit ! Réinvestissez : améliorez la concession, achetez '
+      + 'un relevé de marché, visez un 2e vaisseau. La boucle est lancée.',
+    target: null,
+    done: () => (state.player?.concessions ?? []).some((c) => c.level >= 2)
+      || (state.player?.ships ?? []).length > 1
+      || (state.player?.posts ?? []).length > 0,
+  },
+  {
+    text: 'Vous connaissez le métier. Cap sur les OBJECTIFS — et gardez un œil '
+      + 'sur GUERRES : les pénuries des belligérants paient le mieux.',
+    target: '#btn-objectives',
+    done: () => state.guideFlags.sawObjectives,
+  },
+];
+
+state.guideFlags = { sawMarkets: false, soldOnce: false, sawObjectives: false };
+
+function guideKey() {
+  return `nx-guide-${state.universe?.seed ?? 0}`;
+}
+
+function loadGuide() {
+  try { return JSON.parse(localStorage.getItem(guideKey()) ?? '{"step":0,"off":false}'); }
+  catch { return { step: 0, off: false }; }
+}
+
+function saveGuide(g) {
+  try { localStorage.setItem(guideKey(), JSON.stringify(g)); } catch { /* privé */ }
+}
+
+function updateGuide() {
+  const bar = $('#guide-bar');
+  if (!state.universe || !state.player) return;
+  const g = loadGuide();
+  if (g.off || g.step >= GUIDE_STEPS.length) {
+    bar.hidden = true;
+    clearGuidePulse();
+    return;
+  }
+  // Les étapes déjà satisfaites se valident en cascade (un joueur qui va
+  // plus vite que le guide ne reste pas bloqué dessus).
+  while (g.step < GUIDE_STEPS.length && GUIDE_STEPS[g.step].done()) {
+    g.step++;
+    saveGuide(g);
+  }
+  if (g.step >= GUIDE_STEPS.length) {
+    bar.hidden = true;
+    clearGuidePulse();
+    return;
+  }
+  const step = GUIDE_STEPS[g.step];
+  bar.hidden = false;
+  $('#guide-text').textContent = step.text;
+  $('#guide-step').textContent = `${g.step + 1}/${GUIDE_STEPS.length}`;
+  clearGuidePulse();
+  if (step.target) {
+    for (const el of document.querySelectorAll(step.target)) el.classList.add('guide-pulse');
+  }
+}
+
+function clearGuidePulse() {
+  for (const el of document.querySelectorAll('.guide-pulse')) el.classList.remove('guide-pulse');
+}
+
+$('#guide-skip').addEventListener('click', () => {
+  saveGuide({ ...loadGuide(), off: true });
+  $('#guide-bar').hidden = true;
+  clearGuidePulse();
+  log('Guide masqué — le bouton ? garde l\'aide à portée');
 });
 
 // ── Parties / sauvegardes ─────────────────────────────────────────
@@ -2423,6 +2727,7 @@ function renderHudState(s) {
   $('#hud-tick').textContent = s.tick;
   $('#hud-seed').textContent = s.seed;
   $('#hud-counts').textContent = `${s.systems} systèmes · ${s.planets} planètes`;
+  $('#btn-wars').classList.toggle('war-on', (s.wars?.length ?? 0) > 0);
   for (const btn of document.querySelectorAll('.time-btn[data-speed]')) {
     btn.classList.toggle('active', Number(btn.dataset.speed) === s.speed);
   }
@@ -2520,11 +2825,25 @@ async function fullRefresh() {
 async function pollEvents() {
   const events = await api(`/events?since=${state.lastEventId}`);
   let territoryChanged = false;
+  let toasted = 0;
   for (const e of events) {
     state.lastEventId = Math.max(state.lastEventId, e.id);
     log(e.message);
     if (e.type === 'victory') showVictory(e.message);
     if (['war', 'peace', 'conquest'].includes(e.type)) territoryChanged = true;
+
+    // Les grands moments montent en toast (avec le son qui va avec) —
+    // le journal garde tout, les toasts ne gardent que ce qui compte.
+    if (toasted < 3) {
+      if (e.type === 'objective') { toast(e.message, 'good'); playSound('objective'); toasted++; }
+      else if (e.type === 'war') { toast(e.message, 'bad'); playSound('war'); toasted++; }
+      else if (e.type === 'piracy' || e.type === 'seizure') { toast(e.message, 'bad'); playSound('alert'); toasted++; }
+      else if (e.type === 'rival') { toast(e.message, 'warn'); toasted++; }
+      else if (e.type === 'peace') { toast(e.message, 'info'); toasted++; }
+      else if (e.type === 'loan' && e.message.includes('rembourse')) {
+        toast(e.message, 'good'); playSound('sell'); toasted++;
+      }
+    }
   }
   if (territoryChanged) {
     const universe = await api('/universe');
@@ -2601,6 +2920,7 @@ async function poll() {
       ]);
       renderHudPlayer();
       await refreshPlanetPanel();
+      updateGuide();
     }
   } catch {
     // serveur indisponible : on retentera au prochain poll
@@ -2653,6 +2973,7 @@ async function init() {
   await Promise.all([refreshAlerts(), refreshHouse().catch(() => {}), refreshTraffic().catch(() => {})]);
   startRenderLoop();
   log('Bienvenue à bord. Votre concession produit — chargez, voyagez, vendez plus cher.');
+  updateGuide();
   setInterval(poll, POLL_MS);
 }
 

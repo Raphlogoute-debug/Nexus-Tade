@@ -584,7 +584,7 @@ export function createApiRouter(db, clock) {
     if (!Number.isInteger(planetId) || planetId <= 0 || shipId === null) {
       return res.status(400).json({ error: 'paramètres invalides' });
     }
-    answer(res, startTravel(db, planetId, getCurrentTick(db), shipId));
+    answer(res, startTravel(db, planetId, getCurrentTick(db), shipId, req.body?.escort === true));
   });
 
   // ── Concessions & ateliers ─────────────────────────────────────
@@ -701,6 +701,64 @@ export function createApiRouter(db, clock) {
   // ── Statistiques & classement des maisons ───────────────────────
   router.get('/stats', (req, res) => {
     res.json(statsSnapshot(db));
+  });
+
+  // ── GET /api/wars : le tableau de bord du profiteur de guerre ───
+  // Pour chaque guerre : les deux camps, leurs pénuries stratégiques aux
+  // capitales (prix vs base — où vendre cher), votre réputation et vos
+  // créances de chaque côté, les fronts. Vendre aux DEUX camps est tout
+  // l'art : chaque camp paie, et la guerre dure.
+  router.get('/wars', (req, res) => {
+    const ctx = warContext(db);
+    const player = getPlayer(db);
+    const sideOf = (factionId, war) => {
+      const f = db.prepare('SELECT * FROM factions WHERE id = ?').get(factionId);
+      const shortages = Object.keys(CONFIG.FLEET.BUILD).map((resourceId) => {
+        const m = marketContext(db, f.capital_planet_id, resourceId);
+        return {
+          resource_id: resourceId,
+          name: RESOURCES[resourceId].name,
+          price: m.price,
+          basePrice: m.basePrice,
+          ratio: Math.round((m.price / m.basePrice) * 100) / 100,
+          pressure: Math.round(Math.max(0, (m.target - m.stock) / m.target) * 100) / 100,
+        };
+      }).sort((a, b) => b.ratio - a.ratio);
+      return {
+        id: f.id,
+        name: f.name,
+        color: f.color,
+        capitalPlanetId: f.capital_planet_id,
+        capitalName: db.prepare('SELECT name FROM planets WHERE id = ?')
+          .get(f.capital_planet_id).name,
+        capitalSystemId: db.prepare('SELECT system_id FROM planets WHERE id = ?')
+          .get(f.capital_planet_id).system_id,
+        fleet: Math.round(f.fleet),
+        fleet0: Math.round(war.attacker_id === f.id ? war.attacker_fleet0 : war.defender_fleet0),
+        readiness: Math.round(f.readiness * 100) / 100,
+        standing: Math.round(getStanding(db, f.id)),
+        shortages,
+        openLoans: db.prepare(
+          "SELECT COALESCE(SUM(amount), 0) AS s FROM loans WHERE faction_id = ? AND status = 'open'"
+        ).get(f.id).s,
+        contracts: db.prepare(
+          "SELECT COUNT(*) AS n FROM contracts WHERE faction_id = ? AND status = 'open'"
+        ).get(f.id).n,
+      };
+    };
+    res.json({
+      warProfit: player.war_profit ?? 0,
+      wars: ctx.wars.map((war) => ({
+        id: war.id,
+        since: war.started_tick,
+        attacker: sideOf(war.attacker_id, war),
+        defender: sideOf(war.defender_id, war),
+        fronts: db.prepare(
+          `SELECT wf.system_id, wf.pressure, s.name FROM war_fronts wf
+           JOIN systems s ON s.id = wf.system_id WHERE wf.war_id = ?`
+        ).all(war.id),
+      })),
+    });
   });
 
   // ── Catalogue des scénarios de départ ───────────────────────────
