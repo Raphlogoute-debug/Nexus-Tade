@@ -880,8 +880,9 @@ function renderFleetBar() {
       <span>${where}</span>
       <span>${fmtQty(ship.cargoUsed)}/${fmtQty(ship.cargo_capacity)}</span>
       <button class="mode-toggle ${ship.mode !== 'manual' ? 'auto' : ''}"
-        title="Basculer le mode (une route assignée repasse en manuel)">${
-          ship.mode === 'route' ? 'ROUTE' : ship.mode === 'auto' ? 'AUTO' : 'MAN'}</button>
+        title="Basculer le mode (route ou mission en cours = retour au manuel)">${
+          ship.mode === 'route' ? 'ROUTE' : ship.mode === 'auto' ? 'AUTO'
+            : ship.mode === 'mission' ? 'MISSION' : 'MAN'}</button>
     `;
     chip.addEventListener('click', () => {
       state.selectedShipId = ship.id;
@@ -1126,9 +1127,9 @@ async function selectPlanet(planetId) {
 async function refreshPlanetPanel() {
   const id = state.selectedPlanet;
   if (id === null) return;
-  // Ne pas écraser le formulaire pendant une saisie.
+  // Ne pas écraser le formulaire pendant une saisie ou un choix.
   if (document.activeElement && panel.contains(document.activeElement)
-    && document.activeElement.tagName === 'INPUT') return;
+    && ['INPUT', 'SELECT'].includes(document.activeElement.tagName)) return;
 
   const [planet, market] = await Promise.all([api(`/planet/${id}`), api(`/market/${id}`)]);
   if (state.selectedPlanet !== id) return;
@@ -1264,6 +1265,9 @@ function renderDockedPanel(planet, market) {
           : '<span class="badge">niveau max</span>'}
       </div>
     `;
+
+    // Le commerce en trois choix : ressource, quantité, destination.
+    html += missionSectionHtml(planet, c);
 
     // Ateliers : installés, puis installables selon vos technologies.
     html += `<div class="section-label">Ateliers (×${c.workshops.length})</div>`;
@@ -1691,6 +1695,7 @@ function renderDockedPanel(planet, market) {
   }
 
   fillBestOutlet(planet, market); // suggestion de débouché (asynchrone)
+  bindMissionSection(planet); // formulaire « vendre la production »
 }
 
 // Le conseiller commercial : pour la plus grosse cargaison en soute, le
@@ -1755,6 +1760,111 @@ async function fillBestOutlet(planet, market) {
       log(`Navette « ${r.name} » créée et assignée à ${ship.name} (gérable via ROUTES)`);
     } else {
       log(`Assignation impossible : ${assigned.error}`);
+    }
+    await refreshPlayerAndKnowledge();
+    refreshPlanetPanelForce();
+  });
+}
+
+// — Missions de vente : « vendre N de X à tel marché » ——————————
+// Le commerce en trois choix : ressource, quantité, destination — un
+// vaisseau disponible (à quai, manuel) fait tout le trajet seul, avec
+// rotations si la quantité dépasse sa soute. Le formulaire vit sur la
+// planète de la concession, vaisseau présent ou non.
+
+function missionSectionHtml(planet, c) {
+  const missions = (state.player.missions ?? []).filter((m) => m.from_planet_id === planet.id);
+  const inputStyle = 'background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;padding:3px 5px';
+  let html = `<div class="section-label">Vendre la production</div>
+    <div class="info-block outlet" id="mission-block">`;
+  if (c.storage.length === 0 && missions.length === 0) {
+    html += `<div style="color:var(--dim)">L'entrepôt se remplit tout seul
+      (extraction ${fmtNum.format(c.rate)}/tick) — revenez quand il y a de quoi vendre.</div>`;
+  }
+  if (c.storage.length > 0) {
+    const first = c.storage[0];
+    html += `
+      <div class="row"><span>Vendre</span><span>
+        <select id="mission-res">${c.storage.map((s) =>
+          `<option value="${s.resource_id}" data-qty="${Math.floor(s.quantity)}">${s.name} (${fmtQty(s.quantity)})</option>`).join('')}</select>
+        <input type="number" id="mission-qty" min="1" value="${Math.max(1, Math.floor(first.quantity))}" style="width:80px;${inputStyle}">
+      </span></div>
+      <div class="row" style="margin-top:5px"><span>à</span><span>
+        <select id="mission-dest" style="max-width:235px"><option value="">recherche des marchés connus…</option></select>
+      </span></div>
+      <div style="margin-top:7px">
+        <button class="action-btn primary" id="btn-mission">Envoyer un vaisseau disponible</button>
+      </div>
+      <div style="color:var(--dim);font-size:11px;margin-top:5px">Le vaisseau charge ici, vend
+        là-bas et revient — rotations automatiques si la quantité dépasse sa soute.
+        Escorte payée d'elle-même en zone risquée.</div>`;
+  }
+  for (const m of missions) {
+    html += `<div class="row" style="margin-top:6px">
+      <span>🚀 ${m.ship_name} · ${m.resourceName} → ${m.to_name}</span>
+      <span>reste ${fmtQty(m.quantity)}${m.carrying > 0 ? ` <span style="color:var(--dim)">(soute ${fmtQty(m.carrying)})</span>` : ''}
+      <button class="action-btn mini cancel-mission" data-id="${m.id}" title="Annuler la mission (le vaisseau garde sa cargaison)">✕</button></span></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+async function bindMissionSection(planet) {
+  for (const btn of panel.querySelectorAll('.cancel-mission')) {
+    btn.addEventListener('click', async () => {
+      const r = await fetch(`/api/missions/${btn.dataset.id}`, { method: 'DELETE' })
+        .then((x) => x.json());
+      log(r.ok ? `Mission annulée — ${r.shipName} repasse en manuel` : `Annulation impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+  }
+  const resSel = $('#mission-res');
+  if (!resSel) return;
+
+  const unlocked = new Set([1]);
+  for (const [t, info] of Object.entries(state.player.tiers ?? {})) {
+    if (info.unlocked) unlocked.add(Number(t));
+  }
+
+  // Destinations : les marchés CONNUS de la ressource, les mieux
+  // offrants d'abord, limités aux tiers accessibles.
+  const fillDest = async () => {
+    const scan = await api(`/market-scan/${resSel.value}`);
+    const destSel = $('#mission-dest');
+    if (!destSel) return;
+    const markets = scan.markets
+      .filter((m) => m.planetId !== planet.id && unlocked.has(m.tier))
+      .sort((a, b) => b.price - a.price)
+      .slice(0, 10);
+    destSel.innerHTML = markets.length
+      ? markets.map((m) => `<option value="${m.planetId}">${m.planetName} — ${fmtPrice.format(m.price)} cr${
+          m.ageTicks > 0 ? ` · vu ${m.ageTicks}t` : ''}</option>`).join('')
+      : '<option value="">aucun marché connu — voyagez ou achetez des relevés</option>';
+  };
+  resSel.addEventListener('change', () => {
+    const opt = resSel.selectedOptions[0];
+    $('#mission-qty').value = Math.max(1, Number(opt?.dataset.qty ?? 1));
+    fillDest();
+  });
+  await fillDest();
+
+  $('#btn-mission')?.addEventListener('click', async () => {
+    const toPlanetId = Number($('#mission-dest').value);
+    if (!toPlanetId) { log('Choisissez une destination (marché connu)'); return; }
+    const r = await apiPost('/missions', {
+      resourceId: resSel.value,
+      quantity: Number($('#mission-qty').value),
+      fromPlanetId: planet.id,
+      toPlanetId,
+    });
+    if (r.ok) {
+      toast(`${r.shipName} part vendre ${fmtQty(r.quantity)} ${r.resourceName} à ${r.destName}`, 'good');
+      playSound('sell');
+      log(`Mission : ${r.shipName} — ${fmtQty(r.quantity)} ${r.resourceName} → ${r.destName}`);
+      state.guideFlags.missionCount = (state.guideFlags.missionCount ?? 0) + 1;
+    } else {
+      log(`Mission refusée : ${r.error}`);
     }
     await refreshPlayerAndKnowledge();
     refreshPlanetPanelForce();
@@ -1828,6 +1938,11 @@ async function renderRemotePanel(planet, market) {
   html += `<div id="travel-slot"></div>`;
   html += licenceBlock(planet);
 
+  // Votre concession ici, vue de loin : l'entrepôt se remplit tout seul,
+  // les missions de vente se lancent sans vaisseau sur place.
+  const myConcession = state.player.concessions.find((x) => x.planet_id === planet.id);
+  if (myConcession) html += missionSectionHtml(planet, myConcession);
+
   if (!market.known) {
     html += `<p class="hint">Marché inconnu — aucune donnée. Rapprochez-vous,
       ou achetez un relevé depuis la vue système.</p>`;
@@ -1859,6 +1974,7 @@ async function renderRemotePanel(planet, market) {
   enhancePanel();
   bindBackLink();
   bindLicenceButton();
+  if (myConcession) bindMissionSection(planet);
 
   // Bouton voyage (préparé en asynchrone) — pour le vaisseau piloté.
   const ship = selectedShip();
@@ -2321,40 +2437,29 @@ $('#btn-help').addEventListener('click', () => {
 
 const GUIDE_STEPS = [
   {
-    // Valide quand une soute contient quelque chose.
-    text: 'Votre concession extrait du minerai. Sur votre planète, dépliez '
-      + '« Concession » et cliquez « → soute » pour charger votre vaisseau.',
-    target: '.collect-btn',
-    done: () => (state.player?.ships ?? []).some((s) => s.cargoUsed > 0),
+    text: 'Votre concession mine toute seule dans son entrepôt. Dans « Vendre la '
+      + 'production », choisissez quantité et destination : un vaisseau disponible '
+      + 'fera tout le trajet seul.',
+    target: '#btn-mission',
+    done: () => (state.player?.missions ?? []).length > 0
+      || (state.guideFlags.missionCount ?? 0) > 0 || state.guideFlags.soldOnce,
   },
   {
-    text: 'Cargaison chargée. Ouvrez MARCHÉS (en haut) : il liste les prix '
-      + 'connus de votre minerai — repérez où il se vend plus cher.',
+    text: 'Pendant que ça vole : MARCHÉS compare les prix connus de chaque '
+      + 'ressource (avec leur fraîcheur) — c\'est là que se trouvent les vraies marges.',
     target: '#btn-markets',
     done: () => state.guideFlags.sawMarkets,
   },
   {
-    text: 'Choisissez une planète plus offrante (clic sur son nom), puis '
-      + '« voyager ». Hors des royaumes, payez l\'escorte — les pirates rôdent.',
-    target: '#btn-travel',
-    done: () => (state.player?.ships ?? []).some((s) => s.planet_id === null),
-  },
-  {
-    text: 'En vol… À l\'arrivée, cliquez votre minerai dans le marché puis '
-      + 'VENDRE (bouton « max vente » pour tout écouler). Le profit fait le prestige.',
-    target: '#btn-sell',
-    done: () => state.guideFlags.soldOnce
-      || (state.player?.ships ?? []).some((s) => s.mode === 'route'), // la navette vend pour vous
-  },
-  {
-    text: 'Automatisez ! Retournez à votre concession : le panneau propose '
-      + '« 🔁 navette auto » — votre vaisseau fera la boucle charger → vendre tout seul.',
+    text: 'Pour un flux permanent : chargez votre soute à la concession et cliquez '
+      + '« 🔁 navette auto » — la boucle charger → vendre tournera sans vous.',
     target: '#outlet-shuttle',
-    done: () => (state.player?.ships ?? []).some((s) => s.mode === 'route'),
+    done: () => (state.player?.ships ?? []).some((s) => s.mode === 'route')
+      || (state.guideFlags.missionCount ?? 0) >= 3, // ou vous préférez les missions
   },
   {
-    text: 'Premier revenu automatique : l\'empire est né. Étendez-le — 2e vaisseau, '
-      + 'concessions, comptoirs — en suivant vos OBJECTIFS.',
+    text: 'L\'empire s\'étend : 2e vaisseau, concession, comptoir — l\'entrepôt '
+      + 's\'agrandit via « Améliorer ». Suivez vos OBJECTIFS, la route du Nexus.',
     target: '#btn-objectives',
     done: () => state.guideFlags.sawObjectives,
   },
@@ -2379,9 +2484,13 @@ function updateGuide() {
   const bar = $('#guide-bar');
   if (!state.universe || !state.player) return;
   const g = loadGuide();
-  // Les drapeaux de session (panneaux visités, première vente) suivent
-  // la sauvegarde — un vétéran ne revoit pas les étapes déjà faites.
-  Object.assign(state.guideFlags, g.flags ?? {});
+  // Les drapeaux (panneaux visités, missions lancées…) suivent la
+  // sauvegarde — fusion qui ne perd jamais le progrès de la session.
+  for (const [k, v] of Object.entries(g.flags ?? {})) {
+    state.guideFlags[k] = typeof v === 'number'
+      ? Math.max(v, state.guideFlags[k] ?? 0)
+      : (state.guideFlags[k] || v);
+  }
   if (g.off || g.step >= GUIDE_STEPS.length) {
     bar.hidden = true;
     clearGuidePulse();

@@ -40,6 +40,7 @@ import {
   transferPost, maxPosts,
 } from '../player/posts.js';
 import { listObjectives } from '../player/objectives.js';
+import { createMission, cancelMission, listMissions } from '../player/missions.js';
 import { techCatalog, researchTech, unlockedRecipes, hasTech } from '../player/tech.js';
 import {
   knownMarket, knowledgeSummary, intelCost, recordIntel, systemDistance,
@@ -431,6 +432,7 @@ export function createApiRouter(db, clock) {
         }));
       })(),
       investments: listInvestments(db),
+      missions: listMissions(db),
       loans: listLoans(db),
       tradePartners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
     });
@@ -668,6 +670,23 @@ export function createApiRouter(db, clock) {
       return res.status(400).json({ error: 'paramètres invalides' });
     }
     answer(res, transferPost(db, shipId, resourceId, quantity, direction));
+  });
+
+  // ── Missions de vente : « vendre N de X à tel marché » ──────────
+  router.post('/missions', (req, res) => {
+    const { resourceId, fromPlanetId, toPlanetId } = req.body ?? {};
+    const quantity = Number(req.body?.quantity);
+    if (typeof resourceId !== 'string' || !Number.isInteger(fromPlanetId)
+      || !Number.isInteger(toPlanetId)) {
+      return res.status(400).json({ error: 'paramètres invalides' });
+    }
+    answer(res, createMission(db, { resourceId, quantity, fromPlanetId, toPlanetId }));
+  });
+
+  router.delete('/missions/:id', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id invalide' });
+    answer(res, cancelMission(db, id));
   });
 
   // ── Objectifs / fin de partie ───────────────────────────────────

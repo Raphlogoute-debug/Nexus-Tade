@@ -164,6 +164,20 @@ CREATE TABLE IF NOT EXISTS objectives (
   completed_tick INTEGER NOT NULL
 );
 
+-- Missions de vente (Phase 12) : « vendre N de X à tel marché ». Un
+-- vaisseau disponible charge à la concession, livre, vend, revient —
+-- plusieurs allers-retours si la quantité dépasse sa soute. quantity =
+-- restant à vendre.
+CREATE TABLE IF NOT EXISTS missions (
+  id             INTEGER PRIMARY KEY,
+  ship_id        INTEGER NOT NULL UNIQUE,
+  resource_id    TEXT NOT NULL,
+  quantity       REAL NOT NULL,
+  from_planet_id INTEGER NOT NULL,
+  to_planet_id   INTEGER NOT NULL,
+  created_tick   INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS player_tech (
   tech_id       TEXT PRIMARY KEY,
   acquired_tick INTEGER NOT NULL
@@ -451,7 +465,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
-      'networth_history', 'rival_holdings', 'rivals',
+      'missions', 'networth_history', 'rival_holdings', 'rivals',
       'objectives', 'post_orders', 'post_storage', 'trading_posts',
       'loans', 'industry_shares', 'route_stops', 'routes',
       'player_tech', 'facility_workshops', 'facility_storage', 'concessions',

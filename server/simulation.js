@@ -23,6 +23,7 @@ import { tickTradingPosts } from './player/posts.js';
 import { checkObjectives } from './player/objectives.js';
 import { tickAutoShips } from './player/automation.js';
 import { tickRouteShips } from './player/routes.js';
+import { tickMissions } from './player/missions.js';
 import { tickFleetUpkeep } from './player/shipyard.js';
 import { tickDividends } from './player/investments.js';
 import { processArrivals } from './player/travel.js';
@@ -55,6 +56,7 @@ export function runTick(db) {
     tickFleetUpkeep(db);
     tickAutoShips(db, tick);
     tickRouteShips(db, tick);
+    tickMissions(db, tick);
     tickPiracy(db, tick); // les abordages frappent avant l'amarrage
     events = processArrivals(db, tick);
     if (tick % 5 === 0) checkObjectives(db, tick);

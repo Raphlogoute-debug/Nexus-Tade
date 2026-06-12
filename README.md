@@ -35,22 +35,27 @@ npm run bench      # banc d'essai : coût d'un tick sur disque, partie chargée
 
 Variables d'environnement : `PORT` (défaut 3000), `TICK_MS` (défaut 5000).
 
-## Comment on joue (boucle Phase 2)
+## Comment on joue
 
-1. Votre concession extrait du minerai à chaque tick (25/tick au niveau 1).
-   À quai chez vous : **Charger la soute**. Le marché local est saturé de ce
-   minerai (la planète en extrait aussi) — le vendre sur place rapporte peu.
-2. Regardez la carte : les systèmes brillants sont connus, les éteints non.
-   Les **rumeurs de quai** donnent les prix des systèmes voisins (avec
-   retard) ; les **relevés** s'achètent pour les systèmes lointains.
-3. **Voyagez** (la durée et le carburant dépendent de la distance — le monde
-   continue de tourner pendant le trajet) et vendez où c'est cher. Vos
-   ordres **déplacent les prix** : un gros volume écrase son propre marché.
-4. Le **profit** construit votre **prestige**, qui ouvre les marchés des
-   mondes plus riches (T2 ≥ 50 M hab., T3 ≥ 500 M) — ou achetez une
-   **licence** pour griller l'étape. Les gros mondes = les gros volumes.
-5. Réinvestissez : améliorer la concession (×2,4 puis ×2,5 d'extraction),
-   et plus tard la flotte (Phase 3).
+1. **Votre concession mine toute seule** dans son entrepôt (25/tick au
+   niveau 1 ; « Améliorer » agrandit l'entrepôt et l'extraction).
+2. **Vendre la production** (sur la planète de la concession, vaisseau
+   présent ou non) : choisissez ressource, quantité, destination — un
+   **vaisseau disponible fait tout le trajet seul** : charger, livrer,
+   vendre, revenir, avec rotations si besoin. Un guide vous tend la main
+   les cinq premières minutes.
+3. Les meilleures destinations se trouvent dans **MARCHÉS** (prix connus,
+   fraîcheur des données) : rumeurs de quai pour les voisins, **relevés**
+   payants pour le lointain. Vos ordres **déplacent les prix** — un gros
+   volume écrase son propre marché.
+4. Pour un flux permanent : la **🔁 navette auto** (boucle charger →
+   vendre) ou le constructeur de **ROUTES** pour les circuits complexes.
+   Hors des royaumes, les pirates rôdent — les vaisseaux autonomes paient
+   leur **escorte** d'eux-mêmes.
+5. Le **profit** construit le **prestige**, qui ouvre les marchés des
+   mondes riches (T2/T3 — ou une **licence** pour griller l'étape).
+   Réinvestissez : concessions, **comptoirs** (ordres permanents),
+   ateliers, parts d'industries, quartier général — jusqu'au **NEXUS**.
 
 Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 **→ arrivée** pendant un transit.
@@ -317,9 +322,16 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 - **Revenus de guerre** : compteur dédié (ventes stratégiques aux
   belligérants + contrats en guerre + intérêts de prêts), affiché dans
   GUERRES et les statistiques
+- **Missions de vente — le commerce en trois choix** : la concession
+  mine toute seule dans son entrepôt (agrandi par les améliorations) ;
+  le joueur choisit ressource, quantité, destination (marchés connus,
+  les mieux offrants d'abord) — un vaisseau DISPONIBLE (à quai, manuel)
+  fait tout seul : rejoindre, charger, livrer, vendre, revenir, avec
+  rotations si la quantité dépasse sa soute. Annulable d'un clic, badge
+  MISSION dans la flotte, formulaire utilisable même à distance
 - **Guide des premiers pas** : une barre qui dit QUOI faire maintenant
-  (6 étapes : charger → comparer → voyager → vendre → réinvestir →
-  objectifs), validée sur l'état réel de la partie, bouton visé qui
+  (4 étapes : vendre la production → comparer les marchés → navette →
+  expansion), validée sur l'état réel de la partie, bouton visé qui
   pulse, progression par sauvegarde, désactivable d'un clic
 - **Le jus** : toasts pour les grands moments (objectif, guerre,
   abordage, accaparement rival, prêt remboursé), crédits qui s'envolent
@@ -381,6 +393,7 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `GET /api/stats` | valeur nette, patrimoine, classement des maisons, historique |
 | `GET /api/scenarios` | catalogue des scénarios de départ |
 | `GET /api/wars` | tableau de bord du profiteur : camps, pénuries aux capitales, fronts, revenus de guerre |
+| `POST /api/missions` · `DELETE /api/missions/:id` | missions de vente : un vaisseau libre charge, livre, vend, revient |
 | `GET /api/saves` · `POST /api/saves/new` · `/saves/load` · `DELETE /api/saves/:file` | gestion des parties |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |

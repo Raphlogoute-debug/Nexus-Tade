@@ -29,6 +29,7 @@ import { issueLoan } from '../server/factions/loans.js';
 import { buyFalseFlag } from '../server/player/smuggling.js';
 import { buyPost, setPostOrder, transferPost, upgradePost, listPosts } from '../server/player/posts.js';
 import { listObjectives } from '../server/player/objectives.js';
+import { createMission } from '../server/player/missions.js';
 import { getHouse, buildHQ, upgradeHQ, hqBonuses, renownOf } from '../server/player/house.js';
 import { initRivals, tickRivals } from '../server/economy/rivals.js';
 import { statsSnapshot, netWorthBreakdown, leaderboard } from '../server/player/stats.js';
@@ -1284,6 +1285,56 @@ check(strategicSale.ok && wpAfter > wpBefore,
 // Le tableau de bord /api/wars expose les pénuries des DEUX camps.
 const warsCtx = warContext(db);
 check(warsCtx.wars.length >= 1, `${warsCtx.wars.length} guerre(s) en cours pour le tableau de bord`);
+
+console.log('\n■ Phase 12 — Missions de vente (le commerce en trois choix)\n');
+
+// « Vendre 120 X à tel marché » : un vaisseau disponible charge à la
+// concession, livre, vend, rentre — la mission se classe toute seule.
+const missionHome = listConcessions(db)[0];
+db.prepare('UPDATE ships SET planet_id = ?, mode = ?, fuel = fuel_capacity WHERE id = ?')
+  .run(missionHome.planet_id, 'manual', flagship.id);
+db.prepare('DELETE FROM ship_cargo WHERE ship_id = ?').run(flagship.id);
+db.prepare(
+  `INSERT INTO facility_storage (concession_id, resource_id, quantity) VALUES (?, ?, 200)
+   ON CONFLICT(concession_id, resource_id) DO UPDATE SET quantity = 200`
+).run(missionHome.id, missionHome.resource_id);
+const missionDest = db.prepare(
+  `SELECT p.id, p.name FROM planets p JOIN systems s ON s.id = p.system_id
+   WHERE p.population < 50 AND p.id != ? AND s.id != (SELECT system_id FROM planets WHERE id = ?)
+   LIMIT 1`
+).get(missionHome.planet_id, missionHome.planet_id);
+const mission = createMission(db, {
+  resourceId: missionHome.resource_id,
+  quantity: 120,
+  fromPlanetId: missionHome.planet_id,
+  toPlanetId: missionDest.id,
+});
+check(mission.ok && getShip(db, flagship.id).mode === 'mission',
+  mission.ok && `mission créée : ${mission.shipName} — 120 ${mission.resourceName} → ${mission.destName} (mode MISSION)`);
+
+let missionTicks = 0;
+while (db.prepare('SELECT 1 FROM missions LIMIT 1').get() && missionTicks < 60) {
+  runTick(db);
+  missionTicks++;
+}
+const missionDone = db.prepare(
+  "SELECT COUNT(*) AS n FROM world_events WHERE type = 'mission' AND message LIKE '%ACCOMPLIE%'"
+).get().n;
+check(!db.prepare('SELECT 1 FROM missions LIMIT 1').get() && missionDone >= 1
+  && getShip(db, flagship.id).mode === 'manual',
+  `mission accomplie en ${missionTicks} ticks : chargé, livré, vendu, classé — vaisseau rendu au manuel`);
+
+// Aucun vaisseau disponible : la mission suivante est refusée proprement.
+db.prepare("UPDATE ships SET mode = 'auto' WHERE mode = 'manual'").run();
+const noShip = createMission(db, {
+  resourceId: missionHome.resource_id,
+  quantity: 10,
+  fromPlanetId: missionHome.planet_id,
+  toPlanetId: missionDest.id,
+});
+check(!noShip.ok && noShip.error.includes('disponible'),
+  `sans vaisseau libre, la mission est refusée : « ${noShip.error} »`);
+db.prepare("UPDATE ships SET mode = 'manual' WHERE id = ?").run(flagship.id);
 
 console.log('\n■ Phase 11 — Scénarios de départ\n');
 
