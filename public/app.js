@@ -1328,6 +1328,9 @@ function renderDockedPanel(planet, market) {
   // et la navette automatique en un clic depuis une concession.
   html += '<div id="best-outlet"></div>';
 
+  // Relier ce marché à une concession par une navette permanente.
+  html += linkRouteHtml(planet);
+
   // Clients : offres d'approvisionnement et contrats signés ici.
   html += clientsSectionHtml(planet);
 
@@ -1849,6 +1852,7 @@ function renderDockedPanel(planet, market) {
   fillBestOutlet(planet, market); // suggestion de débouché (asynchrone)
   bindMissionSection(planet); // formulaire « vendre la production »
   bindClientsSection(); // offres et livraisons clients
+  bindLinkRoute(planet); // navette vers ce marché
 }
 
 // Le conseiller commercial : pour la plus grosse cargaison en soute, le
@@ -1897,25 +1901,8 @@ async function fillBestOutlet(planet, market) {
   };
   $('#outlet-link').addEventListener('click', goTo);
   $('#outlet-go').addEventListener('click', goTo);
-  $('#outlet-shuttle')?.addEventListener('click', async () => {
-    const r = await apiPost('/routes', {
-      name: `Navette ${cargo.name} → ${best.planetName}`,
-      stops: [
-        { planetId: planet.id, actions: [{ type: 'load', resourceId: null, quantity: null }] },
-        { planetId: best.planetId, actions: [{ type: 'sell', resourceId: null, quantity: null }] },
-      ],
-    });
-    if (!r.ok) { log(`Navette refusée : ${r.error}`); return; }
-    const assigned = await apiPost(`/ships/${ship.id}/route`, { routeId: r.id });
-    if (assigned.ok) {
-      toast(`Navette créée — ${ship.name} fait la boucle tout seul désormais`, 'good');
-      playSound('objective');
-      log(`Navette « ${r.name} » créée et assignée à ${ship.name} (gérable via ROUTES)`);
-    } else {
-      log(`Assignation impossible : ${assigned.error}`);
-    }
-    await refreshPlayerAndKnowledge();
-    refreshPlanetPanelForce();
+  $('#outlet-shuttle')?.addEventListener('click', () => {
+    createShuttle(planet.id, best.planetId, best.planetName);
   });
 }
 
@@ -2097,6 +2084,71 @@ function bindClientsSection() {
   }
 }
 
+// Depuis la fiche d'un marché : « je vois les prix → navette vers ici ».
+// Visible dès que vous avez une concession ailleurs.
+function linkRouteHtml(planet) {
+  const sources = (state.player.concessions ?? []).filter((c) => c.planet_id !== planet.id);
+  if (sources.length === 0) return '';
+  // Marché verrouillé (tier) : la navette tournerait à vide — on prévient.
+  if (planet.tier > 1 && !state.player.tiers?.[planet.tier]?.unlocked) {
+    return `<div class="info-block" id="link-route-block">
+      <div class="row"><span>🔁 Navette vers ici</span>
+        <span class="badge locked">marché T${planet.tier} verrouillé</span></div>
+      <div style="color:var(--dim);font-size:11px;margin-top:4px">Prestige ou licence d'abord —
+        sinon le vaisseau ferait la boucle sans pouvoir vendre.</div>
+    </div>`;
+  }
+  return `<div class="info-block" id="link-route-block">
+    <div class="row"><span>🔁 Navette vers ici</span><span>
+      ${sources.length > 1
+        ? `<select id="link-route-src">${sources.map((c) =>
+            `<option value="${c.planet_id}">${c.planetName} (${c.resourceName})</option>`).join('')}</select>`
+        : `<span style="color:var(--dim)">${sources[0].planetName}</span>`}
+      <button class="action-btn" id="btn-link-route">Créer</button></span></div>
+    <div style="color:var(--dim);font-size:11px;margin-top:4px">Boucle permanente :
+      charger tout à la concession → vendre tout ici. Un vaisseau libre est assigné d'office.</div>
+  </div>`;
+}
+
+function bindLinkRoute(planet) {
+  $('#btn-link-route')?.addEventListener('click', () => {
+    const sources = (state.player.concessions ?? []).filter((c) => c.planet_id !== planet.id);
+    const fromId = $('#link-route-src') ? Number($('#link-route-src').value) : sources[0]?.planet_id;
+    if (fromId) createShuttle(fromId, planet.id, planet.name);
+  });
+}
+
+// — Navette en un geste : la route « charger tout chez moi → vendre tout
+// là-bas », créée et confiée à un vaisseau libre s'il y en a un.
+async function createShuttle(fromPlanetId, toPlanetId, toName) {
+  const fromEntry = state.planetIndex.get(fromPlanetId);
+  const r = await apiPost('/routes', {
+    name: `Navette ${fromEntry.planet.name} → ${toName}`,
+    stops: [
+      { planetId: fromPlanetId, actions: [{ type: 'load', resourceId: null, quantity: null }] },
+      { planetId: toPlanetId, actions: [{ type: 'sell', resourceId: null, quantity: null }] },
+    ],
+  });
+  if (!r.ok) { log(`Navette refusée : ${r.error}`); return; }
+
+  const missionShips = new Set((state.player.missions ?? []).map((m) => m.ship_id));
+  const free = (state.player.ships ?? []).find((sh) =>
+    sh.mode === 'manual' && sh.planet_id !== null && !missionShips.has(sh.id));
+  if (free) {
+    const a = await apiPost(`/ships/${free.id}/route`, { routeId: r.id });
+    if (a.ok) {
+      toast(`Navette créée — ${free.name} fait la boucle ${fromEntry.planet.name} → ${toName}`, 'good');
+      playSound('objective');
+      log(`Navette « ${r.name} » assignée à ${free.name} (gérable via ROUTES)`);
+    }
+  } else {
+    toast(`Navette « ${r.name} » créée — aucun vaisseau libre, assignez-en un via ROUTES`, 'warn');
+    log(`Navette « ${r.name} » créée sans équipage (ROUTES → Assigner)`);
+  }
+  await refreshPlayerAndKnowledge();
+  refreshPlanetPanelForce();
+}
+
 // Re-rendu forcé (ignore le garde-fou « input actif »).
 async function refreshPlanetPanelForce() {
   const active = document.activeElement;
@@ -2172,6 +2224,9 @@ async function renderRemotePanel(planet, market) {
   // Offres clients de cette planète (visibles aussi de loin).
   html += clientsSectionHtml(planet);
 
+  // « Je vois ce marché, je veux une navette vers ici » — aussi de loin.
+  html += linkRouteHtml(planet);
+
   if (!market.known) {
     html += `<p class="hint">Marché inconnu — aucune donnée. Rapprochez-vous,
       ou achetez un relevé depuis la vue système.</p>`;
@@ -2205,6 +2260,7 @@ async function renderRemotePanel(planet, market) {
   bindLicenceButton();
   if (myConcession) bindMissionSection(planet);
   bindClientsSection();
+  bindLinkRoute(planet);
 
   // Bouton voyage (préparé en asynchrone) — pour le vaisseau piloté.
   const ship = selectedShip();
@@ -3172,7 +3228,7 @@ const ACTION_LABELS = {
 
 function actionSummary(a) {
   const res = a.resourceId
-    ? (state.player.workshopCatalog.find((w) => w.recipe_id === a.resourceId)?.name ?? a.resourceId)
+    ? (state.universe.resources.find((r) => r.id === a.resourceId)?.name ?? a.resourceId)
     : 'tout';
   return `${ACTION_LABELS[a.type].split(' ')[0].toLowerCase()} ${res}${a.quantity ? ` ×${a.quantity}` : ''}`;
 }
@@ -3187,6 +3243,24 @@ async function renderRoutesPanel() {
     <p class="panel-sub">Un circuit d'étapes parcouru en boucle par les
       vaisseaux assignés — la navette régulière de vos concessions.</p>
   `;
+
+  // Assistant : la navette simple en deux choix (de → vers), destinations
+  // triées par le meilleur prix connu pour la ressource de la concession.
+  if (state.player.concessions.length > 0) {
+    html += `<div class="section-label">Navette simple</div>
+      <div class="info-block outlet">
+        <div class="row"><span>De</span><span>
+          <select id="wiz-from">${state.player.concessions.map((c) =>
+            `<option value="${c.planet_id}">${c.planetName} (${c.resourceName})</option>`).join('')}</select></span></div>
+        <div class="row" style="margin-top:5px"><span>vers</span><span>
+          <select id="wiz-to" style="max-width:230px"><option value="">recherche des marchés…</option></select></span></div>
+        <div style="margin-top:7px">
+          <button class="action-btn primary" id="wiz-create">Créer la navette + assigner</button>
+        </div>
+        <div style="color:var(--dim);font-size:11px;margin-top:4px">Charger tout là-bas,
+          vendre tout ici, en boucle — le constructeur complet reste en dessous pour les circuits.</div>
+      </div>`;
+  }
 
   for (const r of routes) {
     html += `<div class="info-block">
@@ -3221,7 +3295,7 @@ async function renderRoutesPanel() {
         </select>
         <select class="act-res" data-i="${i}">
           <option value="">(tout / max)</option>
-          ${state.player.workshopCatalog.map((w) => `<option value="${w.recipe_id}">${w.name}</option>`).join('')}
+          ${state.universe.resources.map((r) => `<option value="${r.id}">${r.name}</option>`).join('')}
         </select>
         <input type="number" class="act-qty" data-i="${i}" placeholder="qté" min="1"
           style="width:64px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;padding:3px 5px">
@@ -3253,6 +3327,40 @@ async function renderRoutesPanel() {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
     else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
   });
+
+  // Assistant navette : destinations = marchés connus de la ressource de
+  // la concession choisie, les mieux offrants d'abord.
+  const wizFrom = $('#wiz-from');
+  if (wizFrom) {
+    const unlockedW = new Set([1]);
+    for (const [t, info] of Object.entries(state.player.tiers ?? {})) {
+      if (info.unlocked) unlockedW.add(Number(t));
+    }
+    const fillWizTo = async () => {
+      const c = state.player.concessions.find((x) => x.planet_id === Number(wizFrom.value));
+      const scan = await api(`/market-scan/${c.resource_id}`);
+      const toSel = $('#wiz-to');
+      if (!toSel) return;
+      const markets = scan.markets
+        .filter((m) => m.planetId !== c.planet_id && unlockedW.has(m.tier))
+        .sort((a, b) => b.price - a.price)
+        .slice(0, 10);
+      toSel.innerHTML = markets.length
+        ? markets.map((m) => `<option value="${m.planetId}" data-name="${m.planetName}">${m.planetName} — ${fmtPrice.format(m.price)} cr${
+            m.ageTicks > 0 ? ` · vu ${m.ageTicks} j` : ''}</option>`).join('')
+        : '<option value="">aucun marché connu — voyagez ou sondez</option>';
+    };
+    wizFrom.addEventListener('change', fillWizTo);
+    fillWizTo();
+    $('#wiz-create').addEventListener('click', async () => {
+      const toSel = $('#wiz-to');
+      const toId = Number(toSel.value);
+      if (!toId) { log('Choisissez une destination connue'); return; }
+      await createShuttle(Number(wizFrom.value), toId, toSel.selectedOptions[0].dataset.name);
+      renderRoutesPanel();
+    });
+  }
+
   $('#route-name').addEventListener('input', (e) => { routeDraft.name = e.target.value; });
 
   $('#add-stop').addEventListener('click', () => {
