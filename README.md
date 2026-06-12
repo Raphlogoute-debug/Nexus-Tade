@@ -4,15 +4,16 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 9 terminée** — la panoplie complète du profiteur de
-guerre : **prêts de guerre** (l'argent part immédiatement en matériel au
-chantier de l'emprunteur — votre prêt renforce vraiment son camp ;
-remboursé ×1,3 s'il gagne, perdu s'il capitule) et **contrebande** (un
-pavillon de complaisance acheté dans la Frange ouvre les listes noires,
-passe les douanes des fronts et rend vos ventes de guerre anonymes —
-jusqu'à la détection, qui brûle la couverture). Par-dessus : actionnariat
-industriel, routes logistiques, industrie sur concession, flotte,
-guerres — et 37 ressources.
+**État actuel : Phase 12 terminée.** Le jeu complet du marchand-puissance :
+univers procédural vivant (royaumes, guerres résolues par l'économie,
+marchands PNJ, **maisons rivales** qui arbitrent et accaparent), commerce
+avec impact prix partout, industrie (concessions, ateliers, parts,
+fondations), **comptoirs à ordres permanents** (accaparer, inonder),
+finance de guerre (prêts, contrats, contrebande), **piraterie et
+escortes**, tableau de bord du **profiteur de guerre**, objectifs jusqu'à
+la victoire « LE NEXUS », votre **maison de commerce** (blason, QG,
+classement par valeur nette), scénarios de départ, sauvegardes multiples,
+guide des premiers pas — 37 ressources, carte animée en continu.
 
 ## Lancer
 
@@ -21,27 +22,18 @@ npm install
 npm start          # → http://localhost:3000
 ```
 
-Au premier lancement, l'univers est généré et persisté dans `nexus-trade.db`
-(SQLite), et une nouvelle partie commence : vaisseau et concession minière
-sur un avant-poste minier (tier 1). Les lancements suivants reprennent la
-même partie.
+Au premier lancement, une partie est créée dans `saves/` (une sauvegarde
+par fichier SQLite) ; les lancements suivants rechargent la dernière
+partie jouée. Le bouton **PARTIES** gère les sauvegardes en jeu :
+création (nom + scénario + seed), chargement à chaud, suppression. Une
+ancienne `nexus-trade.db` à la racine est migrée automatiquement.
 
 ```bash
-npm run verify     # vérification bout en bout sans serveur : économie,
-                   # commerce, voyage, tiers, connaissance (10+ ticks simulés)
+npm run verify     # vérification bout en bout sans serveur (Phases 1 à 12)
 npm run bench      # banc d'essai : coût d'un tick sur disque, partie chargée
 ```
 
-Variables d'environnement : `PORT` (défaut 3000), `TICK_MS` (défaut 5000),
-`NEXUS_DB_PATH` (défaut `nexus-trade.db`).
-
-Nouvel univers + nouvelle partie sans supprimer le fichier :
-
-```bash
-curl -X POST localhost:3000/api/admin/regenerate                  # seed aléatoire
-curl -X POST localhost:3000/api/admin/regenerate \
-     -H 'Content-Type: application/json' -d '{"seed": 42}'        # seed précise
-```
+Variables d'environnement : `PORT` (défaut 3000), `TICK_MS` (défaut 5000).
 
 ## Comment on joue (boucle Phase 2)
 

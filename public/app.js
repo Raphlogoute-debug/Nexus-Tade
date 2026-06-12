@@ -696,7 +696,9 @@ function drawSystems(t) {
       ctx.globalAlpha = capital || isHover || isSelected
         ? 0.95 : labelAlpha * 0.7 * knowledgeAlpha(sys.id);
       ctx.fillStyle = capital ? capital.color : '#8fa1b8';
-      ctx.fillText(sys.name, sx + r + 6, sy + 3);
+      // La Frange porte son avertissement : zone pirate.
+      const label = sys.faction_id === null ? `☠ ${sys.name}` : sys.name;
+      ctx.fillText(label, sx + r + 6, sy + 3);
       ctx.globalAlpha = 1;
     }
   }
@@ -871,7 +873,7 @@ function renderFleetBar() {
     chip.className = `fleet-chip ${ship.id === selectedShip()?.id ? 'selected' : ''}`;
     const where = ship.planet_id !== null
       ? state.planetIndex.get(ship.planet_id).planet.name
-      : `→ ${state.planetIndex.get(ship.dest_planet_id).planet.name} (t${ship.arrival_tick})`;
+      : `→ ${state.planetIndex.get(ship.dest_planet_id).planet.name} (t${ship.arrival_tick})${ship.escorted ? ' 🛡' : ''}`;
     chip.innerHTML = `
       <span class="ship-name">${ship.false_flag ? '⚑ ' : ''}${ship.name}</span>
       <span>${ship.classLabel}</span>
@@ -2159,6 +2161,8 @@ async function renderHousePanel() {
       ${partRow('Entrepôts', nw.parts.storage)}
       ${partRow('Industries', nw.parts.industry)}
       ${partRow('Quartier général', nw.parts.hq)}
+      ${stats.warProfit > 0 ? `<div class="row"><span>dont revenus de guerre (cumul)</span>
+        <span class="price-low">${fmtQty(stats.warProfit)} cr</span></div>` : ''}
     </div>
     <div class="section-label">En chiffres</div>
     <div class="info-block">
@@ -2285,6 +2289,9 @@ function updateGuide() {
   const bar = $('#guide-bar');
   if (!state.universe || !state.player) return;
   const g = loadGuide();
+  // Les drapeaux de session (panneaux visités, première vente) suivent
+  // la sauvegarde — un vétéran ne revoit pas les étapes déjà faites.
+  Object.assign(state.guideFlags, g.flags ?? {});
   if (g.off || g.step >= GUIDE_STEPS.length) {
     bar.hidden = true;
     clearGuidePulse();
@@ -2294,8 +2301,9 @@ function updateGuide() {
   // plus vite que le guide ne reste pas bloqué dessus).
   while (g.step < GUIDE_STEPS.length && GUIDE_STEPS[g.step].done()) {
     g.step++;
-    saveGuide(g);
   }
+  g.flags = state.guideFlags;
+  saveGuide(g);
   if (g.step >= GUIDE_STEPS.length) {
     bar.hidden = true;
     clearGuidePulse();
