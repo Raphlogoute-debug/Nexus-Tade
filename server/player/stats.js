@@ -106,5 +106,11 @@ export function statsSnapshot(db) {
       partners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
       techs: db.prepare('SELECT COUNT(*) AS n FROM player_tech').get().n,
     },
+    // Les compteurs à vie : c'est ici qu'on voit les millions passer.
+    lifetime: {
+      unitsSold: player.total_units_sold ?? 0,
+      unitsBought: player.total_units_bought ?? 0,
+      revenue: player.total_revenue ?? 0,
+    },
   };
 }

@@ -1432,6 +1432,54 @@ console.log('\n■ Phase 13 — Recettes par route\n');
 check(db.pragma('table_info(routes)').some((c) => c.name === 'earned'),
   'les routes tracent leurs recettes cumulées (tableau de bord de la flotte)');
 
+// ── Phase 14 : l'échelle — compteurs à vie, paliers géants ───────
+
+console.log('\n■ Phase 14 — L\'échelle de l\'empire\n');
+
+// Les compteurs à vie tournent (toutes les phases précédentes ont vendu).
+const lifetime = getPlayer(db);
+check((lifetime.total_units_sold ?? 0) > 0 && (lifetime.total_revenue ?? 0) > 0,
+  `compteurs à vie : ${fmt(lifetime.total_units_sold)} unités vendues, ${fmt(lifetime.total_revenue)} cr de CA cumulé`);
+
+// Une vente manuelle incrémente précisément.
+const soldBefore14 = getPlayer(db).total_units_sold;
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?')
+  .run(listConcessions(db)[0].planet_id, flagship.id);
+db.prepare(
+  `INSERT INTO ship_cargo (ship_id, resource_id, quantity, avg_cost) VALUES (?, 'water', 40, 1)
+   ON CONFLICT(ship_id, resource_id) DO UPDATE SET quantity = 40`
+).run(flagship.id);
+executeTrade(db, { side: 'sell', resourceId: 'water', quantity: 40, shipId: flagship.id });
+check(Math.abs(getPlayer(db).total_units_sold - soldBefore14 - 40) < 0.01,
+  'chaque vente nourrit le volume à vie (+40 unités)');
+
+// Concessions niveaux 4-6 : l'échelle industrielle.
+check(CONFIG.PLAYER.CONCESSION_LEVELS.length === 6
+  && CONFIG.PLAYER.CONCESSION_LEVELS[5].rate === 2500,
+  `6 paliers de concession (jusqu'à ${fmt(CONFIG.PLAYER.CONCESSION_LEVELS[5].rate)}/tick × gisement, entrepôt ${fmt(CONFIG.PLAYER.CONCESSION_LEVELS[5].cap)})`);
+
+// Vaisseaux géants : gating T3.
+db.prepare('UPDATE player SET credits = 3000000 WHERE id = 1').run();
+const t1World = db.prepare('SELECT id FROM planets WHERE population < 50 LIMIT 1').get();
+db.prepare("UPDATE ships SET planet_id = ?, mode = 'manual' WHERE id = ?").run(t1World.id, flagship.id);
+db.prepare("UPDATE ships SET planet_id = NULL WHERE id != ? AND planet_id IS NOT NULL").run(flagship.id);
+const lockedBuy = buyShip(db, 'leviathan');
+check(!lockedBuy.ok && lockedBuy.error.includes('tier 3'),
+  'le Léviathan exige un chantier T3 (refusé depuis un avant-poste)');
+const t3World = db.prepare('SELECT id FROM planets WHERE population >= ? LIMIT 1')
+  .get(CONFIG.PLAYER.TIERS[3].minPop);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?').run(t3World.id, flagship.id);
+const bigBuy = buyShip(db, 'leviathan');
+check(bigBuy.ok && getShip(db, bigBuy.shipId).cargo_capacity >= 8000,
+  bigBuy.ok && `Léviathan livré : soute ${fmt(getShip(db, bigBuy.shipId).cargo_capacity)} — les rotations passent à l'échelle`);
+
+// Objectifs d'échelle branchés sur les compteurs.
+const objs14 = listObjectives(db);
+const millionObj = objs14.find((o) => o.id === 'million_mover');
+check(Boolean(millionObj) && millionObj.progress[0].goal === 1000000
+  && millionObj.progress[0].value > 0,
+  `objectif « ${millionObj?.name} » suivi : ${fmt(millionObj?.progress[0].value)}/1 000 000 unités`);
+
 console.log('\n■ Phase 11 — Scénarios de départ\n');
 
 // Un scénario alternatif applique bien ses paramètres (sur une DB neuve).
@@ -1460,8 +1508,8 @@ dbHeir.close();
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 13 vérifiées : économie, guerres, flotte, industrie, routes, '
+  : '\n✓ Phases 1 à 14 vérifiées : économie, guerres, flotte, industrie, routes, '
     + 'investissements, prêts, contrebande, comptoirs, objectifs, maison/QG, rivaux, '
     + 'scénarios, piraterie/escortes, revenus de guerre, missions, gisements, '
-    + 'équipement, clients et accords OK\n');
+    + 'équipement, clients, accords et échelle OK\n');
 process.exit(failures ? 1 : 0);

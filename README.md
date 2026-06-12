@@ -4,7 +4,7 @@ Jeu de simulation économique et politique spatial, solo, dans le navigateur.
 Le joueur part d'une concession minière unique et devient une puissance
 commerciale qui exploite les guerres entre factions sans jamais les mener.
 
-**État actuel : Phase 13 terminée.** Le jeu complet du marchand-puissance :
+**État actuel : Phase 14 terminée.** Le jeu complet du marchand-puissance :
 univers procédural vivant (royaumes, guerres résolues par l'économie,
 marchands PNJ, **maisons rivales** qui arbitrent et accaparent), commerce
 avec impact prix partout, industrie (concessions, ateliers, parts,
@@ -31,7 +31,7 @@ création (nom + scénario + seed), chargement à chaud, suppression. Une
 ancienne `nexus-trade.db` à la racine est migrée automatiquement.
 
 ```bash
-npm run verify     # vérification bout en bout sans serveur (Phases 1 à 13)
+npm run verify     # vérification bout en bout sans serveur (Phases 1 à 14)
 npm run bench      # banc d'essai : coût d'un tick sur disque, partie chargée
 ```
 
@@ -361,6 +361,21 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   (réputation 25 + 20 k cr) — douanes ouvertes sur ses fronts, relevés
   gratuits dans son territoire, appels d'offres assouplis (seuils ÷2) ;
   dénoncé si votre réputation retombe
+
+**Phase 14 — l'échelle** (du colporteur au géant galactique)
+- **Compteurs à vie** : unités vendues/achetées et chiffre d'affaires
+  cumulés depuis la fondation, alimentés par TOUS les canaux (manuel,
+  missions, routes, comptoirs, contrats, clients) — affichés dans
+  MAISON : c'est là qu'on voit passer les millions
+- **Concessions niveaux 4-6** : extraction jusqu'à 2 500/tick × gisement
+  (5 000/tick sur un filon exceptionnel), entrepôts jusqu'à 200 000,
+  coûts en centaines de milliers puis millions
+- **Vaisseaux géants** : Grand Vraquier (soute 2 000) et Léviathan
+  (8 000, plus de 10 000 rétrofitté) — chantiers des grands mondes (T3),
+  prix 250 k et 1,5 M cr
+- **Objectifs d'échelle** : « Premier million » (1 M d'unités vendues),
+  « Géant régional » (10 systèmes + 40 partenaires), « Seigneur des
+  volumes » (100 M d'unités) — l'arche du petit transporteur au géant
 
 **UI** (`public/`, vanilla, zéro dépendance)
 - En-tête : blason + nom + rang de votre maison ; bouton PARTIES (overlay

@@ -9,7 +9,7 @@ import { RESOURCES } from '../../data/resources.js';
 import { marketContext } from '../economy/market.js';
 import { nextPrice } from '../economy/pricing.js';
 import { getCurrentTick } from '../db.js';
-import { getPlayer, getShip, adjustCredits, addPrestige } from '../player/state.js';
+import { getPlayer, getShip, adjustCredits, addPrestige, recordTradeVolume } from '../player/state.js';
 import { warContext } from './war.js';
 import { getStanding, adjustStanding } from './standing.js';
 
@@ -142,6 +142,7 @@ export function deliverContract(db, contractId, shipId) {
       contract.deliver_planet_id, contract.resource_id);
 
     adjustCredits(db, paid);
+    recordTradeVolume(db, 'sell', delivered, paid);
     // Livrer un belligérant, c'est du revenu de guerre (score du profiteur).
     if (warContext(db).factionWar.has(contract.faction_id)) {
       db.prepare('UPDATE player SET war_profit = ROUND(war_profit + ?, 2) WHERE id = 1').run(paid);

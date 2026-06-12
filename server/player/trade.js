@@ -15,6 +15,7 @@ import { marketContext, applyMarketTrade } from '../economy/market.js';
 import { getCurrentTick } from '../db.js';
 import {
   getPlayer, getShip, cargoUsed, adjustCredits, addPrestige, tierOf, hasTierAccess,
+  recordTradeVolume,
 } from './state.js';
 import { recordFullSnapshot } from './knowledge.js';
 import { marketOpen, onPlayerSale, onFlaggedTrade } from '../factions/standing.js';
@@ -138,6 +139,7 @@ export function executeTrade(db, { side, resourceId, quantity, shipId }) {
       standingShift = onPlayerSale(db, tick, planet.faction_id, resourceId, quantity, executed.total);
     }
 
+    recordTradeVolume(db, side, quantity, side === 'sell' ? executed.total : 0);
     recordFullSnapshot(db, planet.id, tick); // on voit ce qu'on vient de faire
   })();
 

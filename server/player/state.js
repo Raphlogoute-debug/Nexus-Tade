@@ -60,6 +60,23 @@ export function adjustCredits(db, delta) {
   db.prepare('UPDATE player SET credits = ROUND(credits + ?, 2) WHERE id = 1').run(delta);
 }
 
+// Compteurs à vie de la maison : volumes échangés et chiffre d'affaires.
+// Tous les canaux de vente (manuel, missions, routes, comptoirs,
+// contrats, clients) passent par ici — c'est là que les millions du
+// late game deviennent visibles.
+export function recordTradeVolume(db, side, quantity, revenue = 0) {
+  if (side === 'sell') {
+    db.prepare(
+      `UPDATE player SET total_units_sold = ROUND(total_units_sold + ?, 2),
+         total_revenue = ROUND(total_revenue + ?, 2) WHERE id = 1`
+    ).run(quantity, revenue);
+  } else {
+    db.prepare(
+      'UPDATE player SET total_units_bought = ROUND(total_units_bought + ?, 2) WHERE id = 1'
+    ).run(quantity);
+  }
+}
+
 export function addPrestige(db, points) {
   db.prepare('UPDATE player SET prestige = ROUND(prestige + ?, 1) WHERE id = 1').run(points);
 }

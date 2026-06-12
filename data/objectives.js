@@ -76,11 +76,35 @@ export const OBJECTIVES = [
     requires: [{ metric: 'techs', goal: 12 }],
   },
   {
+    id: 'million_mover',
+    name: 'Premier million',
+    desc: 'Vendre 1 000 000 d\'unités (toutes ventes confondues)',
+    reward: 500,
+    requires: [{ metric: 'unitsSold', goal: 1000000 }],
+  },
+  {
     id: 'magnate',
     name: 'Magnat',
     desc: 'Détenir 10 000 000 de crédits',
     reward: 500,
     requires: [{ metric: 'credits', goal: 10000000 }],
+  },
+  {
+    id: 'regional_giant',
+    name: 'Géant régional',
+    desc: 'Présence dans 10 systèmes et 40 partenaires commerciaux',
+    reward: 600,
+    requires: [
+      { metric: 'presence', goal: 10 },
+      { metric: 'partners', goal: 40 },
+    ],
+  },
+  {
+    id: 'volume_lord',
+    name: 'Seigneur des volumes',
+    desc: 'Vendre 100 000 000 d\'unités — vos convois irriguent la galaxie',
+    reward: 1000,
+    requires: [{ metric: 'unitsSold', goal: 100000000 }],
   },
   {
     id: 'nexus',

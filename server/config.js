@@ -92,10 +92,15 @@ export const CONFIG = {
 
     // Niveaux de concession (index = niveau - 1). rate = extraction/tick,
     // cap = taille de l'entrepôt, cost = prix du passage À ce niveau.
+    // Les paliers 4-6 sont l'échelle industrielle : de l'atelier de
+    // quartier au complexe minier planétaire (× la qualité du gisement).
     CONCESSION_LEVELS: [
       { rate: 25, cap: 1500, cost: 0 },
       { rate: 60, cap: 4000, cost: 8000 },
       { rate: 150, cap: 10000, cost: 30000 },
+      { rate: 400, cap: 30000, cost: 120000 },
+      { rate: 1000, cap: 80000, cost: 500000 },
+      { rate: 2500, cap: 200000, cost: 2000000 },
     ],
 
     // Parts d'industries planétaires (Phase 8) : investir dans les
@@ -372,6 +377,12 @@ export const CONFIG = {
       courier: { label: 'Navette', cargo: 100, speed: 220, fuel: 300, price: 8000, upkeep: 2 },
       freighter: { label: 'Cargo', cargo: 250, speed: 150, fuel: 400, price: 20000, upkeep: 4 },
       hauler: { label: 'Vraquier', cargo: 700, speed: 100, fuel: 600, price: 60000, upkeep: 10 },
+      // L'échelle supérieure : les volumes en dizaines de milliers par
+      // rotation. Les chantiers des grands mondes (T3) seulement.
+      freight_liner: { label: 'Grand Vraquier', cargo: 2000, speed: 90, fuel: 900,
+        price: 250000, upkeep: 30, minTier: 3 },
+      leviathan: { label: 'Léviathan', cargo: 8000, speed: 70, fuel: 1400,
+        price: 1500000, upkeep: 120, minTier: 3 },
     },
     BUY_MIN_TIER: 2, // les chantiers civils sont sur les mondes établis
     MAX_FLEET: 100,  // garde-fou purement technique

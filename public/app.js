@@ -1400,15 +1400,18 @@ function renderDockedPanel(planet, market) {
     `;
   }
 
-  // Chantier civil : acheter des vaisseaux sur les mondes établis.
+  // Chantier civil : acheter des vaisseaux sur les mondes établis. Les
+  // géants (Grand Vraquier, Léviathan) sortent des chantiers T3.
   if (shipHere && planet.tier >= 2) {
     html += `<div class="section-label">Chantier civil — flotte ${state.player.ships.length}/${state.player.maxFleet}</div><div>`;
     for (const [classId, cls] of Object.entries(state.player.shipClasses)) {
-      const disabled = state.player.credits < cls.price
+      const tierLocked = planet.tier < (cls.minTier ?? 2);
+      const disabled = tierLocked || state.player.credits < cls.price
         || state.player.ships.length >= state.player.maxFleet;
       html += `<button class="action-btn buy-ship" data-class="${classId}" ${disabled ? 'disabled' : ''}
-        title="soute ${cls.cargo} · vitesse ${cls.speed} · réservoir ${cls.fuel} · entretien ${cls.upkeep} cr/tick">
-        ${cls.label} (${fmtQty(cls.price)} cr · ${cls.upkeep}/tick)</button>`;
+        title="${tierLocked ? `chantier de tier ${cls.minTier} requis — les géants sortent des grands mondes`
+          : `soute ${fmtQty(cls.cargo)} · vitesse ${cls.speed} · réservoir ${fmtQty(cls.fuel)} · entretien ${cls.upkeep} cr/tick`}">
+        ${cls.label} (${fmtQty(cls.price)} cr · ${cls.upkeep}/tick)${tierLocked ? ' 🔒T3' : ''}</button>`;
     }
     html += `</div>`;
   }
@@ -2614,6 +2617,12 @@ async function renderHousePanel() {
       <div class="row"><span>Industries</span><span>${stats.counts.industries}</span></div>
       <div class="row"><span>Partenaires commerciaux</span><span>${stats.counts.partners}</span></div>
       <div class="row"><span>Technologies</span><span>${stats.counts.techs}</span></div>
+    </div>
+    <div class="section-label">Depuis la fondation</div>
+    <div class="info-block">
+      <div class="row"><span>Unités vendues</span><span class="price-low">${fmtQty(stats.lifetime?.unitsSold ?? 0)}</span></div>
+      <div class="row"><span>Unités achetées</span><span>${fmtQty(stats.lifetime?.unitsBought ?? 0)}</span></div>
+      <div class="row"><span>Chiffre d'affaires cumulé</span><span class="price-low">${fmtQty(stats.lifetime?.revenue ?? 0)} cr</span></div>
     </div>`;
 
   panel.innerHTML = html;

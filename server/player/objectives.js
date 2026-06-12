@@ -18,6 +18,8 @@ const METRIC_LABELS = {
   presence: 'systèmes couverts',
   loansRepaid: 'prêts remboursés',
   techs: 'technologies',
+  unitsSold: 'unités vendues',
+  revenue: 'chiffre d\'affaires (cr)',
 };
 
 const count = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
@@ -41,6 +43,8 @@ export function computeMetrics(db) {
       "SELECT COUNT(*) AS n FROM loans WHERE status = 'repaid'"
     ).get().n,
     techs: count(db, 'player_tech'),
+    unitsSold: player.total_units_sold ?? 0,
+    revenue: player.total_revenue ?? 0,
   };
 }
 

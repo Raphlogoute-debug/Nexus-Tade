@@ -24,14 +24,16 @@ export function buyShip(db, classId) {
   }
 
   // L'achat se fait là où se trouve N'IMPORTE quel vaisseau à quai sur un
-  // monde tier 2+. Le nouveau vaisseau y est livré.
+  // monde du tier requis (les géants sortent des chantiers des grands
+  // mondes). Le nouveau vaisseau y est livré.
+  const tierRequired = cls.minTier ?? SH.BUY_MIN_TIER;
   const dockyard = fleet.find((s) => {
     if (s.planet_id === null) return false;
     const pop = db.prepare('SELECT population FROM planets WHERE id = ?').get(s.planet_id).population;
-    return tierOf(pop) >= SH.BUY_MIN_TIER;
+    return tierOf(pop) >= tierRequired;
   });
   if (!dockyard) {
-    return { ok: false, error: `il faut un vaisseau à quai sur un monde tier ${SH.BUY_MIN_TIER}+ (chantier civil)` };
+    return { ok: false, error: `il faut un vaisseau à quai sur un monde tier ${tierRequired}+ (chantier civil)` };
   }
 
   const player = getPlayer(db);

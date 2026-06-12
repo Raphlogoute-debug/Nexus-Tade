@@ -8,7 +8,7 @@
 import { CONFIG } from '../config.js';
 import { RESOURCES } from '../../data/resources.js';
 import { getCurrentTick } from '../db.js';
-import { getPlayer, getShip, getCargo, adjustCredits, addPrestige, tierOf, hasTierAccess } from '../player/state.js';
+import { getPlayer, getShip, getCargo, adjustCredits, addPrestige, tierOf, hasTierAccess, recordTradeVolume } from '../player/state.js';
 import { marketContext } from './market.js';
 import { nextPrice, targetStock } from './pricing.js';
 import { resourceDemand } from './engine.js';
@@ -192,6 +192,7 @@ export function deliverSupplyContract(db, contractId, shipId) {
       sc.planet_id, sc.resource_id);
 
     adjustCredits(db, paid);
+    recordTradeVolume(db, 'sell', delivered, paid);
     db.prepare(
       `UPDATE supply_contracts SET remaining = ROUND(remaining - ?, 2),
          status = CASE WHEN remaining - ? <= 0 THEN 'done' ELSE 'taken' END WHERE id = ?`

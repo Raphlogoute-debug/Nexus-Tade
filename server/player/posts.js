@@ -13,7 +13,7 @@
 import { CONFIG } from '../config.js';
 import { RESOURCES } from '../../data/resources.js';
 import { getCurrentTick } from '../db.js';
-import { getShip, getPlayer, getCargo, cargoUsed, adjustCredits, tierOf, hasTierAccess } from './state.js';
+import { getShip, getPlayer, getCargo, cargoUsed, adjustCredits, tierOf, hasTierAccess, recordTradeVolume } from './state.js';
 import { hasTech } from './tech.js';
 import { applyMarketTrade, marketContext } from '../economy/market.js';
 import { recordFullSnapshot } from './knowledge.js';
@@ -91,6 +91,7 @@ export function tickTradingPosts(db, tick) {
           if (qty >= 1) {
             const r = applyMarketTrade(db, post.planet_id, o.resource_id, qty, 'buy', m);
             adjustCredits(db, -r.total);
+            recordTradeVolume(db, 'buy', qty);
             upsert.run(post.id, o.resource_id, qty, r.unitPrice);
             used += qty;
             credits -= r.total;
@@ -105,6 +106,7 @@ export function tickTradingPosts(db, tick) {
           if (qty >= 1) {
             const r = applyMarketTrade(db, post.planet_id, o.resource_id, qty, 'sell', m);
             adjustCredits(db, r.total);
+            recordTradeVolume(db, 'sell', qty, r.total);
             upsert.run(post.id, o.resource_id, -qty, 0);
             used -= qty;
             credits += r.total;

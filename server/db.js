@@ -427,6 +427,10 @@ const MIGRATIONS = [
   { table: 'player', column: 'war_profit', ddl: 'ALTER TABLE player ADD COLUMN war_profit REAL NOT NULL DEFAULT 0' },
   // Phase 13 : recettes cumulées par route (tableau de bord de la flotte).
   { table: 'routes', column: 'earned', ddl: 'ALTER TABLE routes ADD COLUMN earned REAL NOT NULL DEFAULT 0' },
+  // Phase 14 : l'échelle — compteurs à vie (les millions deviennent visibles).
+  { table: 'player', column: 'total_units_sold', ddl: 'ALTER TABLE player ADD COLUMN total_units_sold REAL NOT NULL DEFAULT 0' },
+  { table: 'player', column: 'total_units_bought', ddl: 'ALTER TABLE player ADD COLUMN total_units_bought REAL NOT NULL DEFAULT 0' },
+  { table: 'player', column: 'total_revenue', ddl: 'ALTER TABLE player ADD COLUMN total_revenue REAL NOT NULL DEFAULT 0' },
 ];
 
 export function createDb(path) {
