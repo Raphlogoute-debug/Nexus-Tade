@@ -280,7 +280,35 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
   + présence dans 8 systèmes), est la **victoire** : bannière, puis la
   partie continue en bac à sable
 
+**Phase 11 — votre maison de commerce** (`server/player/house.js`,
+`server/player/stats.js`, `server/economy/rivals.js`, `server/game.js`,
+`server/saves.js`, `data/scenarios.js`, `data/objectives.js`)
+- **Identité** : votre maison a un nom et un blason (renommables), et un
+  rang de renom qui suit le prestige (Colporteur → Magnat du Nexus)
+- **Quartier général** : un siège bâti puis amélioré (3 niveaux) dont les
+  bonus sont câblés — entretien de flotte allégé (jusqu'à −50 %), plafond
+  de vaisseaux élargi (+10), relevés de marché remisés (−60 %). Losange
+  aux couleurs du blason sur la carte
+- **Maisons rivales** : 4 concurrents nommés qui jouent au même jeu —
+  arbitrer bas→haut sur les VRAIS marchés (impact prix partagé) et
+  accaparer une ressource sur une planète (annoncé au journal, le prix y
+  grimpe puis ils écoulent). Vous les affrontez à un **classement par
+  valeur nette**, avec graphe d'évolution. Modélisation légère
+  (flux statistiques d'identité, pas des flottes pleines)
+- **Statistiques** : valeur nette (le vrai score) décomposée par poste
+  (trésorerie, cargaisons, entrepôts, industries, QG), compteurs, rang
+- **Scénarios de départ** : Colporteur (classique), Héritier (départ
+  riche, T2), Réfugié (500 cr, sans concession), Profiteur (une guerre
+  éclate au tick 0) — chacun fixe capital, flotte et présence initiale
+- **Sauvegardes multiples** : chaque partie dans son fichier sous
+  `saves/`, listées et basculables à chaud (le serveur recharge la partie
+  active sans redémarrer) ; création avec nom + scénario + seed
+  optionnelle ; l'ancien `nexus-trade.db` est migré en première sauvegarde
+
 **UI** (`public/`, vanilla, zéro dépendance)
+- En-tête : blason + nom + rang de votre maison ; bouton PARTIES (overlay
+  de sauvegardes + sélecteur de scénario), panneau MAISON (identité, QG,
+  classement, patrimoine)
 - Carte vivante, rendue en continu (requestAnimationFrame) : fond étoilé
   en parallaxe avec nébuleuses, territoires de faction en halos doux
   (calque pré-rendu), étoiles-sprites lumineuses, noms des systèmes au
@@ -326,6 +354,12 @@ Contrôles du temps dans le bandeau : pause / ×1 / ×2 / ×4 et
 | `POST /api/posts/:id/orders` · `DELETE .../orders/:oid` | ordres permanents (achat ≤ limite / vente ≥ plancher) |
 | `POST /api/posts/transfer` | transferts soute ↔ entrepôt du comptoir |
 | `GET /api/objectives` | jalons de carrière : statut, progression, victoire |
+| `GET /api/house` | identité de la maison : nom, blason, renom, quartier général |
+| `POST /api/house/rename` · `/house/color` | renommer la maison, changer le blason |
+| `POST /api/hq/build` · `/hq/upgrade` | bâtir / améliorer le quartier général |
+| `GET /api/stats` | valeur nette, patrimoine, classement des maisons, historique |
+| `GET /api/scenarios` | catalogue des scénarios de départ |
+| `GET /api/saves` · `POST /api/saves/new` · `/saves/load` · `DELETE /api/saves/:file` | gestion des parties |
 | `POST /api/ships/buy` · `POST /api/ships/:id/mode` | achat de vaisseau, bascule manuel/auto |
 | `GET /api/tech` · `POST /api/tech/research` | arbre technologique et recherche |
 | `POST /api/concession/collect` · `/deposit` · `/upgrade` | transferts entrepôt↔soute, amélioration |
@@ -389,12 +423,14 @@ tout tourne tel quel sur une base `:memory:` (c'est ce que fait
   prix vivants seulement), voisinages stellaires précalculés et scans
   partagés pour les PNJ et la flotte.
 
-## Reste à faire (Phase 11+)
+## Reste à faire (Phase 12+)
 
 - Contrôle des routes : piraterie qui intercepte les convois, escortes,
   points de passage stratégiques à sécuriser
 - Profit de guerre approfondi : embargos à exploiter/contourner, ventes
   d'armes aux deux camps avec conséquences
+- Maisons rivales plus agressives : comptoirs et QG visibles, rachats,
+  guerres de prix ciblées contre le joueur
 - Ressources exotiques ultra-rares par biome ; équilibrage global après
   sessions de jeu réelles
 - SSE à la place du polling ; état de simulation en mémoire si un jour

@@ -4,16 +4,23 @@
 import { CONFIG } from '../config.js';
 import { getPlayer, getShip, getFleet, adjustCredits, tierOf } from './state.js';
 import { hasTech } from './tech.js';
+import { hqBonuses } from './house.js';
 
 const SH = CONFIG.SHIPS;
+
+// Plafond de flotte : garde-fou technique + bonus du quartier général.
+export function maxFleet(db) {
+  return SH.MAX_FLEET + hqBonuses(db).maxFleetBonus;
+}
 
 export function buyShip(db, classId) {
   const cls = SH.CLASSES[classId];
   if (!cls) return { ok: false, error: 'classe de vaisseau inconnue' };
 
   const fleet = getFleet(db);
-  if (fleet.length >= SH.MAX_FLEET) {
-    return { ok: false, error: `limite technique de ${SH.MAX_FLEET} vaisseaux atteinte` };
+  const cap = maxFleet(db);
+  if (fleet.length >= cap) {
+    return { ok: false, error: `limite de ${cap} vaisseaux atteinte (agrandissez le QG)` };
   }
 
   // L'achat se fait là où se trouve N'IMPORTE quel vaisseau à quai sur un
@@ -48,11 +55,13 @@ export function buyShip(db, classId) {
 }
 
 // Entretien de la flotte, prélevé à chaque tick (peut mettre le compte en
-// découvert — la flotte reste alors à quai jusqu'à régularisation).
+// découvert — la flotte reste alors à quai jusqu'à régularisation). Le
+// quartier général allège la facture.
 export function fleetUpkeep(db) {
   let total = 0;
   for (const s of getFleet(db)) total += SH.CLASSES[s.class]?.upkeep ?? 0;
-  return total;
+  total *= (1 - hqBonuses(db).upkeepReduction);
+  return Math.round(total * 100) / 100;
 }
 
 export function tickFleetUpkeep(db) {

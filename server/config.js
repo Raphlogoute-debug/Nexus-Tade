@@ -173,6 +173,36 @@ export const CONFIG = {
 
     // Garde-fou du bouton « avancer jusqu'à l'arrivée ».
     SKIP_MAX_TICKS: 200,
+
+    // Maison de commerce (Phase 11) : votre identité. Le rang de renom
+    // découle du prestige (purement cosmétique, mais c'est le fil rouge).
+    HOUSE: {
+      DEFAULT_NAMES: ['Comptoir Vasari', 'Guilde Orhane', 'Maison Téra',
+        'Consortium Lyre', 'Compagnie Solenne', 'Frères Aldenn'],
+      CREST_COLORS: ['#53c7f0', '#e8b35a', '#5fd68b', '#c77dff', '#f07861', '#56c4c4'],
+      RENOWN: [
+        { at: 0, title: 'Colporteur' },
+        { at: 200, title: 'Négociant' },
+        { at: 1000, title: 'Marchand établi' },
+        { at: 3000, title: 'Armateur notable' },
+        { at: 8000, title: 'Prince marchand' },
+        { at: 20000, title: 'Magnat du Nexus' },
+      ],
+    },
+
+    // Quartier général (Phase 11) : le siège de votre maison. Construit
+    // une fois, amélioré ensuite ; chaque niveau allège l'entretien de la
+    // flotte, élargit le plafond technique de vaisseaux et remise les
+    // relevés de marché. Marqueur sur la carte aux couleurs du blason.
+    HQ: {
+      BUILD_COST: 60000,
+      LEVELS: [
+        { upkeepReduction: 0.15, maxFleetBonus: 3, intelDiscount: 0.2 },
+        { upkeepReduction: 0.30, maxFleetBonus: 6, intelDiscount: 0.4 },
+        { upkeepReduction: 0.50, maxFleetBonus: 10, intelDiscount: 0.6 },
+      ],
+      UPGRADE_COST: [120000, 350000], // pour passer au niveau 2 puis 3
+    },
   },
 
   // ── Phase 3 : factions, flux, PNJ ────────────────────────────
@@ -227,6 +257,29 @@ export const CONFIG = {
 
   // Marchands indépendants (agents pleins) : ils font le même métier que
   // le joueur, sur les mêmes marchés, avec les mêmes règles d'impact prix.
+  // Maisons de commerce rivales (Phase 11) : des concurrents nommés, qui
+  // jouent au même jeu que vous — arbitrer sur les vrais marchés (impact
+  // prix partagé) et accaparer des ressources. Vous les affrontez au
+  // classement par valeur nette. Modélisation légère : flux statistiques
+  // datés d'identité, pas des flottes pleines.
+  RIVALS: {
+    COUNT: 4,
+    START_CREDITS: 80000,
+    NAMES: ['Maison Karkadann', 'Consortium Vol', 'Guilde des Sept Vents',
+      'Compagnie Sidérale', 'Comptoir Ravn', 'Cartel Mensh', 'Banque Oltari'],
+    COLORS: ['#d98c5f', '#7d9ee0', '#5fb0a0', '#c77dff', '#d8a23f', '#56c4c4', '#b85d8e'],
+    ACT_EVERY: 3,            // chaque rival délibère un tick sur ACT_EVERY
+    SCAN_PLANETS: 14,        // planètes échantillonnées par délibération
+    MARGIN: 0.18,            // marge relative minimale pour un coup
+    DEAL_CAPACITY: 220,      // volume max par opération d'arbitrage
+    CORNER_CHANCE: 0.04,     // proba de lancer un accaparement (quand riche)
+    CORNER_TICKS: 14,        // durée d'un accaparement avant écoulement
+    CORNER_FLOW: 60,         // unités drainées par tick pendant l'accaparement
+    CORNER_MIN_CREDITS: 120000, // il faut les reins solides pour accaparer
+    HISTORY_EVERY: 10,       // échantillonnage de la valeur nette (ticks)
+    HISTORY_KEEP: 120,       // points conservés par sujet
+  },
+
   TRADERS: {
     PER_SYSTEMS: 2,         // ~1 marchand pour 2 systèmes
     CAPACITY: 150,

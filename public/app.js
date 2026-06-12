@@ -65,6 +65,8 @@ const state = {
   lanes: [], // voies commerciales agrégées depuis le trafic
   showTraffic: true,
   tickSync: null, // { at, progress, periodMs } : interpolation sous-tick
+  house: null, // identité de la maison (nom, blason, QG, renom)
+  newSaveScenario: 'colporteur',
 };
 
 function selectedShip() {
@@ -544,6 +546,27 @@ function drawPlayerAssets() {
     if (!entry) continue;
     const [sx, sy] = toScreen(entry.system.x, entry.system.y);
     drawCorners(sx, sy, starRadius(entry.system) + 8, 'rgba(95,214,139,0.85)');
+  }
+  // Quartier général : losange plein aux couleurs du blason, couronné.
+  const hq = state.house?.hq;
+  if (hq?.systemId != null) {
+    const entry = state.planetIndex.get(hq.planetId);
+    const sys = entry?.system ?? state.universe.systems.find((s) => s.id === hq.systemId);
+    if (sys) {
+      const [sx, sy] = toScreen(sys.x, sys.y);
+      const d = starRadius(sys) + 11;
+      ctx.fillStyle = state.house.color;
+      ctx.strokeStyle = state.house.color;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - d); ctx.lineTo(sx + d, sy);
+      ctx.lineTo(sx, sy + d); ctx.lineTo(sx - d, sy);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.globalAlpha = 0.25;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
   }
 }
 
@@ -1686,6 +1709,231 @@ async function renderObjectivesPanel() {
 
 $('#btn-objectives').addEventListener('click', renderObjectivesPanel);
 
+// ── Maison de commerce : identité, QG, classement, statistiques ───
+
+function renderHouseHeader() {
+  const h = state.house;
+  if (!h) return;
+  $('#house-crest').style.background = h.color;
+  $('#house-name').textContent = h.name;
+  $('#house-rank').textContent = h.renown.title;
+}
+
+async function refreshHouse() {
+  state.house = await api('/house');
+  renderHouseHeader();
+}
+
+function netWorthSpark(history, color, w = 320, h = 44) {
+  // Petit graphe multi-séries (vous + rivaux) sur l'historique de valeur nette.
+  const series = Object.entries(history);
+  if (series.length === 0) return '';
+  let min = Infinity; let max = -Infinity; let tmin = Infinity; let tmax = -Infinity;
+  for (const [, pts] of series) for (const p of pts) {
+    min = Math.min(min, p.value); max = Math.max(max, p.value);
+    tmin = Math.min(tmin, p.tick); tmax = Math.max(tmax, p.tick);
+  }
+  const span = max - min || 1; const tspan = tmax - tmin || 1;
+  const x = (t) => 2 + (t - tmin) / tspan * (w - 4);
+  const y = (v) => h - 3 - (v - min) / span * (h - 6);
+  let svg = `<svg width="${w}" height="${h}" class="nw-spark">`;
+  for (const [subject, pts] of series) {
+    if (pts.length < 2) continue;
+    const isMe = subject === 'player';
+    const stroke = isMe ? color : 'rgba(120,134,154,0.5)';
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.tick).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ');
+    svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${isMe ? 1.8 : 1}"/>`;
+  }
+  return svg + '</svg>';
+}
+
+async function renderHousePanel() {
+  state.selectedPlanet = null;
+  const [house, stats] = await Promise.all([api('/house'), api('/stats')]);
+  state.house = house;
+  renderHouseHeader();
+  const ship = selectedShip();
+  const shipDocked = ship?.planet_id != null;
+
+  const nw = stats.netWorth;
+  const partRow = (label, val) => `<div class="row"><span>${label}</span><span>${fmtQty(val)} cr</span></div>`;
+
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title" style="color:${house.color}">${house.name}</h2>
+    <p class="panel-sub">${house.renown.title}${house.renown.next
+      ? ` · prochain rang « ${house.renown.next.title} » à ${fmtQty(house.renown.next.at)} prestige` : ' · rang suprême'}</p>
+
+    <div class="section-label">Identité</div>
+    <div class="info-block">
+      <div class="row"><span>Nom de la maison</span><span>
+        <input type="text" id="house-rename" value="${house.name.replace(/"/g, '&quot;')}" maxlength="40"
+          style="width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;padding:3px 5px">
+        <button class="action-btn" id="btn-rename">OK</button></span></div>
+      <div class="row" style="margin-top:6px"><span>Blason</span><span id="crest-swatches"></span></div>
+    </div>
+
+    <div class="section-label">Quartier général</div>`;
+
+  if (house.hq.level === 0) {
+    html += `<div class="info-block">
+      <div style="color:var(--dim);margin-bottom:6px">Le siège de votre maison : allège l'entretien
+        de la flotte, élargit le plafond de vaisseaux, remise les relevés de marché.</div>
+      <button class="action-btn" id="btn-hq-build" ${shipDocked ? '' : 'disabled'}>
+        ${shipDocked ? `Bâtir le QG ici (${fmtQty(house.hq.nextCost)} cr)` : 'Amarrez-vous pour bâtir'}
+      </button></div>`;
+  } else {
+    const b = house.hq.bonuses;
+    html += `<div class="info-block">
+      <div class="row"><span>Siège</span><span>${house.hq.planetName} · niv. ${house.hq.level}/${house.hq.maxLevel}</span></div>
+      <div class="row"><span>Entretien flotte</span><span class="price-low">−${Math.round(b.upkeepReduction * 100)} %</span></div>
+      <div class="row"><span>Plafond de flotte</span><span class="price-low">+${b.maxFleetBonus}</span></div>
+      <div class="row"><span>Relevés de marché</span><span class="price-low">−${Math.round(b.intelDiscount * 100)} %</span></div>
+      ${house.hq.nextCost !== null
+        ? `<button class="action-btn" id="btn-hq-upgrade">Agrandir (${fmtQty(house.hq.nextCost)} cr)</button>`
+        : '<span class="badge">niveau max</span>'}
+    </div>`;
+  }
+
+  html += `<div class="section-label">Classement des maisons</div>`;
+  for (const e of stats.leaderboard) {
+    const max = stats.leaderboard[0].netWorth || 1;
+    const pct = Math.max(2, Math.round((e.netWorth / max) * 100));
+    html += `<div class="leader-row ${e.isPlayer ? 'me' : ''}">
+      <div class="leader-head">
+        <span><span class="lead-dot" style="background:${e.color}"></span>${e.rank}. ${e.name}${e.isPlayer ? ' (vous)' : ''}</span>
+        <span>${fmtQty(e.netWorth)} cr</span>
+      </div>
+      <div class="gauge"><div style="width:${pct}%;background:${e.color}"></div></div>
+    </div>`;
+  }
+  html += `<div style="margin-top:8px">${netWorthSpark(stats.history, house.color)}</div>`;
+
+  html += `<div class="section-label">Patrimoine — ${fmtQty(nw.total)} cr</div>
+    <div class="info-block">
+      ${partRow('Trésorerie', nw.parts.credits)}
+      ${partRow('Cargaisons', nw.parts.cargo)}
+      ${partRow('Entrepôts', nw.parts.storage)}
+      ${partRow('Industries', nw.parts.industry)}
+      ${partRow('Quartier général', nw.parts.hq)}
+    </div>
+    <div class="section-label">En chiffres</div>
+    <div class="info-block">
+      <div class="row"><span>Flotte</span><span>${stats.counts.fleet}</span></div>
+      <div class="row"><span>Concessions · comptoirs</span><span>${stats.counts.concessions} · ${stats.counts.posts}</span></div>
+      <div class="row"><span>Industries</span><span>${stats.counts.industries}</span></div>
+      <div class="row"><span>Partenaires commerciaux</span><span>${stats.counts.partners}</span></div>
+      <div class="row"><span>Technologies</span><span>${stats.counts.techs}</span></div>
+    </div>`;
+
+  panel.innerHTML = html;
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+
+  // Nuancier de blason.
+  const swatches = $('#crest-swatches');
+  for (const c of ['#53c7f0', '#e8b35a', '#5fd68b', '#c77dff', '#f07861', '#56c4c4', '#b85d8e']) {
+    const b = document.createElement('button');
+    b.className = 'crest-swatch';
+    b.style.background = c;
+    if (c.toLowerCase() === house.color.toLowerCase()) b.classList.add('sel');
+    b.addEventListener('click', async () => {
+      const r = await apiPost('/house/color', { color: c });
+      if (r.ok) { await refreshHouse(); renderHousePanel(); }
+    });
+    swatches.appendChild(b);
+  }
+
+  $('#btn-rename').addEventListener('click', async () => {
+    const r = await apiPost('/house/rename', { name: $('#house-rename').value });
+    if (r.ok) { log(`Maison renommée « ${r.name} »`); await refreshHouse(); renderHousePanel(); }
+    else log(`Renommage refusé : ${r.error}`);
+  });
+  $('#btn-hq-build')?.addEventListener('click', async () => {
+    const r = await apiPost('/hq/build', { shipId: selectedShip()?.id });
+    if (r.ok) log(`Quartier général bâti sur ${r.planetName} (−${fmtQty(r.cost)} cr)`);
+    else log(`Construction refusée : ${r.error}`);
+    await refreshPlayerAndKnowledge(); await refreshHouse(); renderHousePanel();
+  });
+  $('#btn-hq-upgrade')?.addEventListener('click', async () => {
+    const r = await apiPost('/hq/upgrade');
+    if (r.ok) log(`QG agrandi au niveau ${r.level} (−${fmtQty(r.cost)} cr)`);
+    else log(`Agrandissement refusé : ${r.error}`);
+    await refreshPlayerAndKnowledge(); await refreshHouse(); renderHousePanel();
+  });
+}
+
+$('#btn-house').addEventListener('click', renderHousePanel);
+$('#house-badge').addEventListener('click', renderHousePanel);
+
+// ── Parties / sauvegardes ─────────────────────────────────────────
+
+async function openSavesOverlay() {
+  const data = await api('/saves');
+  const scenarios = await api('/scenarios');
+  const list = $('#saves-list');
+  list.innerHTML = '';
+  for (const s of data.saves) {
+    const row = document.createElement('div');
+    row.className = `save-row ${s.active ? 'active' : ''}`;
+    row.innerHTML = `
+      <div class="save-meta">
+        <div><strong>${s.saveName}</strong>${s.active ? ' <span class="badge live">EN COURS</span>' : ''}</div>
+        <div class="save-sub">tick ${fmtInt.format(s.tick)} · ${s.credits != null ? fmtQty(s.credits) + ' cr' : '—'}
+          · seed ${s.seed}${s.scenario ? ' · ' + s.scenario : ''}</div>
+      </div>
+      <div class="save-actions">
+        ${s.active ? '' : `<button class="action-btn load-save" data-file="${s.file}">Charger</button>`}
+        ${s.active ? '' : `<button class="action-btn del-save" data-file="${s.file}">✕</button>`}
+      </div>`;
+    list.appendChild(row);
+  }
+  for (const btn of list.querySelectorAll('.load-save')) {
+    btn.addEventListener('click', async () => {
+      await apiPost('/saves/load', { file: btn.dataset.file });
+      location.reload(); // on repart sur la partie chargée
+    });
+  }
+  for (const btn of list.querySelectorAll('.del-save')) {
+    btn.addEventListener('click', async () => {
+      await fetch(`/api/saves/${btn.dataset.file}`, { method: 'DELETE' });
+      openSavesOverlay();
+    });
+  }
+
+  // Sélecteur de scénario.
+  const scnList = $('#scenario-list');
+  scnList.innerHTML = '';
+  for (const scn of scenarios) {
+    const opt = document.createElement('button');
+    opt.className = `scenario-opt ${scn.id === state.newSaveScenario ? 'sel' : ''}`;
+    opt.innerHTML = `<div class="scn-head"><strong>${scn.name}</strong>
+      <span class="badge">${scn.difficulty}</span></div>
+      <div class="scn-desc">${scn.desc}</div>`;
+    opt.addEventListener('click', () => {
+      state.newSaveScenario = scn.id;
+      openSavesOverlay();
+    });
+    scnList.appendChild(opt);
+  }
+
+  $('#saves-overlay').hidden = false;
+}
+
+$('#btn-saves').addEventListener('click', openSavesOverlay);
+$('#saves-close').addEventListener('click', () => { $('#saves-overlay').hidden = true; });
+$('#new-save-go').addEventListener('click', async () => {
+  const name = $('#new-save-name').value.trim() || 'Nouvelle partie';
+  const seedRaw = $('#new-save-seed').value;
+  const body = { name, scenario: state.newSaveScenario };
+  if (seedRaw) body.seed = Number(seedRaw);
+  const r = await apiPost('/saves/new', body);
+  if (r.ok) location.reload();
+  else log(`Création refusée : ${r.error}`);
+});
+
 // Victoire : l'événement « victory » déclenche la bannière (une fois).
 function showVictory(message) {
   $('#victory-text').textContent = message;
@@ -2195,7 +2443,8 @@ async function poll() {
     renderHudState(s);
     if (tickChanged) {
       await Promise.all([
-        refreshPlayerAndKnowledge(), pollEvents(), refreshAlerts(), refreshHeatmap(), refreshTraffic(),
+        refreshPlayerAndKnowledge(), pollEvents(), refreshAlerts(), refreshHeatmap(),
+        refreshTraffic(), refreshHouse(),
       ]);
       renderHudPlayer();
       await refreshPlanetPanel();
@@ -2248,7 +2497,7 @@ async function init() {
     await selectPlanet(entry.planet.id);
   }
 
-  await Promise.all([refreshAlerts(), refreshTraffic().catch(() => {})]);
+  await Promise.all([refreshAlerts(), refreshHouse().catch(() => {}), refreshTraffic().catch(() => {})]);
   startRenderLoop();
   log('Bienvenue à bord. Votre concession produit — chargez, voyagez, vendez plus cher.');
   setInterval(poll, POLL_MS);

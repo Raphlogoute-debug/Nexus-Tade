@@ -6,6 +6,7 @@ import { BIOMES } from '../../data/biomes.js';
 import { createRng } from '../universe/rng.js';
 import { getMeta, getCurrentTick } from '../db.js';
 import { recordFullSnapshot, recordGossipAround } from './knowledge.js';
+import { SCENARIO_BY_ID, DEFAULT_SCENARIO } from '../../data/scenarios.js';
 
 const PL = CONFIG.PLAYER;
 
@@ -62,40 +63,79 @@ export function addPrestige(db, points) {
 }
 
 // ── Nouvelle partie ──────────────────────────────────────────────
-// Le joueur démarre sur un monde minier T1 (ouvert à tous) avec une
-// concession qui extrait la ressource phare du biome local. Comme la
-// planète extrait déjà la même chose, le marché local est saturé : le prix
-// y est bas, ce qui pousse immédiatement à transporter ailleurs.
+// Le scénario fixe le capital, la flotte et la présence de départ. Par
+// défaut (« colporteur »), le joueur démarre sur un monde minier T1 avec
+// une concession qui extrait la ressource phare du biome local : comme la
+// planète extrait déjà la même chose, le marché y est saturé, le prix bas,
+// ce qui pousse immédiatement à transporter ailleurs.
 
-export function initPlayer(db) {
+export function initPlayer(db, opts = {}) {
+  const scenario = SCENARIO_BY_ID[opts.scenarioId] ?? SCENARIO_BY_ID[DEFAULT_SCENARIO];
   const rng = createRng((Number(getMeta(db, 'seed')) ^ 0x9e3779b9) >>> 0);
   const tick = getCurrentTick(db);
 
-  const candidates = db.prepare(
-    `SELECT id, system_id, biome FROM planets
-     WHERE population < ? AND biome IN ('rocky', 'volcanic', 'desert')
-     ORDER BY id`
-  ).all(PL.TIERS[2].minPop);
+  // Monde de départ : un monde minier ouvert à tous, ou un monde de la
+  // Frange (sans faction) pour les départs précaires.
+  const query = scenario.home === 'fringe'
+    ? `SELECT p.id, p.system_id, p.biome FROM planets p
+       JOIN systems s ON s.id = p.system_id
+       WHERE p.population < ? AND s.faction_id IS NULL
+         AND p.biome IN ('rocky', 'volcanic', 'desert') ORDER BY p.id`
+    : `SELECT p.id, p.system_id, p.biome FROM planets p
+       WHERE p.population < ? AND p.biome IN ('rocky', 'volcanic', 'desert') ORDER BY p.id`;
+  let candidates = db.prepare(query).all(PL.TIERS[2].minPop);
+  if (candidates.length === 0) {
+    candidates = db.prepare(
+      `SELECT id, system_id, biome FROM planets WHERE population < ?
+       AND biome IN ('rocky', 'volcanic', 'desert') ORDER BY id`
+    ).all(PL.TIERS[2].minPop);
+  }
   const home = candidates[Math.floor(rng.next() * candidates.length)];
 
-  // Ressource de concession = la plus extraite par le biome de départ.
   const extraction = BIOMES[home.biome].extraction;
   const resourceId = Object.entries(extraction).sort((a, b) => b[1] - a[1])[0][0];
 
+  // Identité de la maison : fournie, ou tirée au sort (déterministe).
+  const H = PL.HOUSE;
+  const houseName = opts.houseName?.trim()
+    || H.DEFAULT_NAMES[Math.floor(rng.next() * H.DEFAULT_NAMES.length)];
+  const houseColor = opts.houseColor
+    || H.CREST_COLORS[Math.floor(rng.next() * H.CREST_COLORS.length)];
+
   db.transaction(() => {
-    db.prepare('INSERT INTO player (id, credits, prestige, licence_tier) VALUES (1, ?, 0, 1)')
-      .run(PL.START_CREDITS);
+    db.prepare(
+      `INSERT INTO player (id, credits, prestige, licence_tier, house_name, house_color, hq_level)
+       VALUES (1, ?, 0, ?, ?, ?, 0)`
+    ).run(scenario.credits, scenario.licenceTier, houseName, houseColor);
+
+    // Vaisseau-amiral, puis les éventuels vaisseaux supplémentaires du
+    // scénario (livrés sur le monde de départ).
     db.prepare(
       `INSERT INTO ships (name, planet_id, cargo_capacity, fuel, fuel_capacity, speed, mode, class)
        VALUES (?, ?, ?, ?, ?, ?, 'manual', 'freighter')`
     ).run(PL.SHIP.NAME, home.id, PL.SHIP.CARGO, PL.SHIP.FUEL_CAP, PL.SHIP.FUEL_CAP, PL.SHIP.SPEED);
-    db.prepare(
-      'INSERT INTO concessions (planet_id, resource_id, level) VALUES (?, ?, 1)'
-    ).run(home.id, resourceId);
+    scenario.ships.forEach((classId, i) => {
+      const cls = CONFIG.SHIPS.CLASSES[classId];
+      if (!cls) return;
+      db.prepare(
+        `INSERT INTO ships (name, planet_id, cargo_capacity, fuel, fuel_capacity, speed, mode, class)
+         VALUES (?, ?, ?, ?, ?, ?, 'manual', ?)`
+      ).run(CONFIG.SHIPS.NAMES[(i + 1) % CONFIG.SHIPS.NAMES.length],
+        home.id, cls.cargo, cls.fuel, cls.fuel, cls.speed, classId);
+    });
+
+    if (scenario.concession) {
+      db.prepare('INSERT INTO concessions (planet_id, resource_id, level) VALUES (?, ?, 1)')
+        .run(home.id, resourceId);
+    }
 
     recordFullSnapshot(db, home.id, tick);
     recordGossipAround(db, home.system_id, tick);
   })();
 
-  return { homePlanetId: home.id, concessionResource: resourceId };
+  return {
+    homePlanetId: home.id,
+    concessionResource: scenario.concession ? resourceId : null,
+    scenario,
+  };
 }

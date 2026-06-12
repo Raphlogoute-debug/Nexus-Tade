@@ -75,8 +75,12 @@ export function intelCost(db, fromSystemId, targetSystemId) {
   const dist = systemDistance(db, fromSystemId, targetSystemId);
   const network = db.prepare(
     "SELECT 1 FROM player_tech WHERE tech_id = 'trade_network'").get();
+  // Le quartier général remise les relevés (lecture directe pour éviter
+  // un cycle d'import avec house.js).
+  const hqLevel = db.prepare('SELECT hq_level FROM player WHERE id = 1').get()?.hq_level ?? 0;
+  const hqDiscount = hqLevel > 0 ? PL.HQ.LEVELS[hqLevel - 1].intelDiscount : 0;
   return Math.round((PL.INTEL.BASE_COST + PL.INTEL.COST_PER_DIST * dist)
-    * (network ? PL.FACILITIES.NETWORK_INTEL_MULT : 1));
+    * (network ? PL.FACILITIES.NETWORK_INTEL_MULT : 1) * (1 - hqDiscount));
 }
 
 export function recordIntel(db, targetSystemId, tick) {

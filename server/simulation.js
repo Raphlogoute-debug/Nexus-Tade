@@ -16,6 +16,7 @@ import { planShipments, processShipmentArrivals } from './factions/logistics.js'
 import { tickFleets } from './factions/fleet.js';
 import { tickContracts } from './factions/contracts.js';
 import { tickTraders } from './npc/traders.js';
+import { tickRivals } from './economy/rivals.js';
 import { tickConcessions } from './player/concession.js';
 import { tickTradingPosts } from './player/posts.js';
 import { checkObjectives } from './player/objectives.js';
@@ -46,6 +47,7 @@ export function runTick(db) {
     planShipments(db, tick);
     tickFleets(db);
     tickTraders(db, tick);
+    tickRivals(db, tick);
     tickContracts(db, tick);
     tickConcessions(db);
     tickTradingPosts(db, tick);

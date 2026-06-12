@@ -1,51 +1,22 @@
 // Point d'entrée : Express (API + fichiers statiques) et horloge de
 // simulation contrôlable (pause / ×1 / ×2 / ×4, saut jusqu'à l'arrivée).
+// La partie active vit dans un « holder » qu'on peut remplacer à chaud
+// (changement de sauvegarde) sans redémarrer le serveur.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CONFIG } from './config.js';
-import { createDb, getMeta, setMeta, getCurrentTick } from './db.js';
-import { generateUniverse, ensureResourceRows } from './universe/generator.js';
-import { randomSeed } from './universe/rng.js';
+import { setMeta, getCurrentTick } from './db.js';
 import { runTick } from './simulation.js';
-import { generateFactions } from './factions/generate.js';
-import { initTraders } from './npc/traders.js';
-import { initPlayer, getPlayer, getShip } from './player/state.js';
+import { getShip } from './player/state.js';
+import { openGame } from './game.js';
+import { listSaves, newSave, deleteSave, migrateLegacy, ensureSavesDir } from './saves.js';
 import { createApiRouter } from './routes/api.js';
 
 const rootDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const db = createDb(path.resolve(rootDir, CONFIG.DB_PATH));
-
-// Premier lancement : pas de seed en DB → on génère l'univers.
-if (getMeta(db, 'seed') === null) {
-  const { seed, systems, planets } = generateUniverse(db, randomSeed());
-  console.log(`✦ Univers généré — seed ${seed} : ${systems} systèmes, ${planets} planètes`);
-} else {
-  console.log(`✦ Univers chargé — seed ${getMeta(db, 'seed')}`);
-}
-
-// Nouvelles ressources du catalogue : les parties existantes reçoivent
-// les lignes de marché manquantes.
-const addedRows = ensureResourceRows(db);
-if (addedRows > 0) console.log(`✦ Catalogue étendu : ${addedRows} marchés ajoutés aux planètes existantes`);
-
-// Factions et marchands : créés s'ils manquent (migration des parties
-// antérieures à la Phase 3 comprise).
-if (!db.prepare('SELECT 1 FROM factions LIMIT 1').get()) {
-  const { factions } = generateFactions(db);
-  console.log(`✦ ${factions} factions fondées`);
-}
-if (!db.prepare('SELECT 1 FROM traders LIMIT 1').get()) {
-  const { traders } = initTraders(db);
-  console.log(`✦ ${traders} marchands indépendants en activité`);
-}
-
-// Nouvelle partie si aucun joueur (couvre aussi les DB de la Phase 1).
-if (!getPlayer(db)) {
-  const { homePlanetId, concessionResource } = initPlayer(db);
-  console.log(`✦ Nouvelle partie — concession de ${concessionResource} sur la planète #${homePlanetId}`);
-}
+const SAVES_DIR = path.resolve(rootDir, 'saves');
 
 // ── Horloge ──────────────────────────────────────────────────────
 // La vitesse multiplie la fréquence des ticks (0 = pause). Le saut
@@ -53,8 +24,8 @@ if (!getPlayer(db)) {
 
 const SPEEDS = [0, 1, 2, 4];
 
-function createClock() {
-  let speed = Number(getMeta(db, 'time_speed') ?? 1);
+function createClock(db) {
+  let speed = Number(db.prepare("SELECT value FROM meta WHERE key = 'time_speed'").get()?.value ?? 1);
   let timer = null;
   let lastTickAt = Date.now();
 
@@ -75,8 +46,6 @@ function createClock() {
   return {
     speeds: SPEEDS,
     getSpeed: () => speed,
-    // Fraction (0..1) du tick courant déjà écoulée — le client s'en sert
-    // pour interpoler les positions (vaisseaux, convois) entre deux ticks.
     getProgress: () => speed === 0 ? 0
       : Math.min(1, (Date.now() - lastTickAt) / (CONFIG.TICK_MS / speed)),
     setSpeed(s) {
@@ -84,7 +53,6 @@ function createClock() {
       setMeta(db, 'time_speed', s);
       reschedule();
     },
-    // Avance jusqu'au tick cible (borné). Retourne le nombre de ticks joués.
     skipUntil(targetTick) {
       let played = 0;
       while (getCurrentTick(db) < targetTick && played < CONFIG.PLAYER.SKIP_MAX_TICKS) {
@@ -99,23 +67,95 @@ function createClock() {
   };
 }
 
-const clock = createClock();
+// ── Partie active (holder remplaçable) ───────────────────────────
+
+ensureSavesDir(SAVES_DIR);
+migrateLegacy(SAVES_DIR, path.resolve(rootDir, CONFIG.DB_PATH));
+
+// La partie à ouvrir au démarrage : la dernière jouée, ou une neuve.
+function pickStartupSave() {
+  const saves = listSaves(SAVES_DIR);
+  if (saves.length > 0) return saves[0].file;
+  const created = newSave(SAVES_DIR, { name: 'Première partie', scenario: 'colporteur' });
+  return created.file;
+}
+
+const game = { db: null, clock: null, file: null, apiRouter: null };
+
+function loadGame(file) {
+  if (game.clock) game.clock.stop();
+  if (game.db) game.db.close();
+  game.file = file;
+  game.db = openGame(path.join(SAVES_DIR, file));
+  game.clock = createClock(game.db);
+  game.apiRouter = createApiRouter(game.db, game.clock);
+  game.clock.start();
+  const seed = game.db.prepare("SELECT value FROM meta WHERE key = 'seed'").get()?.value;
+  console.log(`✦ Partie « ${file} » chargée — seed ${seed}`);
+}
+
+loadGame(pickStartupSave());
+
+// ── Serveur ──────────────────────────────────────────────────────
 
 const app = express();
 app.use(express.json());
-app.use('/api', createApiRouter(db, clock));
+
+// Gestion des sauvegardes : routeur stable (monté en premier), avec accès
+// au holder pour basculer de partie à chaud.
+app.use('/api/saves', createSavesRouter());
+
+// API de jeu : délègue toujours au routeur de la partie courante.
+app.use('/api', (req, res, next) => game.apiRouter(req, res, next));
+
 app.use(express.static(path.join(rootDir, 'public')));
 
 app.listen(CONFIG.PORT, () => {
-  const ship = getShip(db);
+  const ship = getShip(game.db);
   console.log(`✦ Nexus Trade sur http://localhost:${CONFIG.PORT}`
-    + ` (tick ${CONFIG.TICK_MS} ms ×${clock.getSpeed()}, vaisseau sur planète #${ship.planet_id ?? 'transit'})`);
+    + ` (tick ${CONFIG.TICK_MS} ms ×${game.clock.getSpeed()},`
+    + ` vaisseau sur planète #${ship?.planet_id ?? 'transit'})`);
 });
-
-clock.start();
 
 process.on('SIGINT', () => {
-  clock.stop();
-  db.close();
+  game.clock?.stop();
+  game.db?.close();
   process.exit(0);
 });
+
+// ── Routeur des sauvegardes ──────────────────────────────────────
+
+function createSavesRouter() {
+  const router = express.Router();
+
+  router.get('/', (req, res) => {
+    res.json({ active: game.file, saves: listSaves(SAVES_DIR, game.file, game.db) });
+  });
+
+  router.post('/new', (req, res) => {
+    const { name, scenario, seed } = req.body ?? {};
+    try {
+      const created = newSave(SAVES_DIR, { name, scenario, seed });
+      loadGame(created.file); // on bascule aussitôt sur la nouvelle partie
+      res.json({ ok: true, ...created, active: created.file });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: String(e.message ?? e) });
+    }
+  });
+
+  router.post('/load', (req, res) => {
+    const file = path.basename(String(req.body?.file ?? ''));
+    if (!fs.existsSync(path.join(SAVES_DIR, file))) {
+      return res.status(404).json({ ok: false, error: 'sauvegarde introuvable' });
+    }
+    loadGame(file);
+    res.json({ ok: true, active: file });
+  });
+
+  router.delete('/:file', (req, res) => {
+    const r = deleteSave(SAVES_DIR, req.params.file, game.file);
+    res.status(r.ok ? 200 : 400).json(r);
+  });
+
+  return router;
+}

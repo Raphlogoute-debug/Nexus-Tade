@@ -9,10 +9,16 @@
 <body>
   <header>
     <h1>NEXUS<span>TRADE</span></h1>
+    <button id="house-badge" title="Votre maison de commerce">
+      <span id="house-crest"></span>
+      <span id="house-name">—</span>
+      <span id="house-rank" class="stat"></span>
+    </button>
     <div class="header-stats">
       <span class="stat">TICK <strong id="hud-tick">—</strong></span>
       <span class="stat">SEED <strong id="hud-seed">—</strong></span>
       <span class="stat"><strong id="hud-counts">—</strong></span>
+      <button id="btn-saves" class="time-btn" title="Parties / sauvegardes">PARTIES</button>
     </div>
   </header>
 
@@ -26,6 +32,7 @@
     <button id="btn-routes" class="time-btn" title="Routes logistiques">ROUTES</button>
     <button id="btn-markets" class="time-btn" title="Comparateur de marchés / arbitrage">MARCHÉS</button>
     <button id="btn-objectives" class="time-btn" title="Jalons de carrière et victoire">OBJECTIFS</button>
+    <button id="btn-house" class="time-btn" title="Maison de commerce, QG, classement">MAISON</button>
     <span id="time-controls">
       <button class="time-btn" data-speed="0" title="Pause">⏸</button>
       <button class="time-btn" data-speed="1" title="Vitesse normale">×1</button>
@@ -83,6 +90,25 @@
       <div class="victory-title">★ VICTOIRE ★</div>
       <p id="victory-text"></p>
       <button class="action-btn" id="victory-close">Continuer en bac à sable</button>
+    </div>
+  </div>
+
+  <div id="saves-overlay" hidden>
+    <div class="overlay-box">
+      <div class="overlay-head">
+        <span class="overlay-title">Parties</span>
+        <button id="saves-close" class="back-link">✕ fermer</button>
+      </div>
+      <div id="saves-list"></div>
+      <div class="section-label">Nouvelle partie</div>
+      <div id="new-save-form" class="info-block">
+        <input type="text" id="new-save-name" placeholder="Nom de la partie" maxlength="40">
+        <div id="scenario-list"></div>
+        <div class="row" style="margin-top:8px">
+          <span><input type="number" id="new-save-seed" placeholder="seed (optionnel)" min="1"></span>
+          <span><button class="action-btn" id="new-save-go">Fonder la maison</button></span>
+        </div>
+      </div>
     </div>
   </div>
 

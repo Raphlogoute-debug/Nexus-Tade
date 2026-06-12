@@ -9,7 +9,7 @@
 import { CONFIG } from '../server/config.js';
 import { createDb, getCurrentTick } from '../server/db.js';
 import { generateUniverse, ensureResourceRows } from '../server/universe/generator.js';
-import { buyShip, setShipMode } from '../server/player/shipyard.js';
+import { buyShip, setShipMode, fleetUpkeep, maxFleet } from '../server/player/shipyard.js';
 import { runTick } from '../server/simulation.js';
 import { RECIPES } from '../data/recipes.js';
 import { RESOURCES } from '../data/resources.js';
@@ -29,6 +29,10 @@ import { issueLoan } from '../server/factions/loans.js';
 import { buyFalseFlag } from '../server/player/smuggling.js';
 import { buyPost, setPostOrder, transferPost, upgradePost, listPosts } from '../server/player/posts.js';
 import { listObjectives } from '../server/player/objectives.js';
+import { getHouse, buildHQ, upgradeHQ, hqBonuses, renownOf } from '../server/player/house.js';
+import { initRivals, tickRivals } from '../server/economy/rivals.js';
+import { statsSnapshot, netWorthBreakdown, leaderboard } from '../server/player/stats.js';
+import { SCENARIO_BY_ID } from '../data/scenarios.js';
 import { RECIPES as ALL_RECIPES, recipeOutput } from '../data/recipes.js';
 
 const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
@@ -73,15 +77,15 @@ check(distances === (gen.systems * (gen.systems - 1)) / 2,
 
 // ── 2. Reproductibilité ──────────────────────────────────────────
 
-const db2 = createDb(':memory:');
-generateUniverse(db2, SEED);
+const dbScn = createDb(':memory:');
+generateUniverse(dbScn, SEED);
 const fingerprint = (d) => JSON.stringify({
   systems: d.prepare('SELECT * FROM systems ORDER BY id').all(),
   planets: d.prepare('SELECT * FROM planets ORDER BY id').all(),
   resources: d.prepare('SELECT * FROM planet_resources ORDER BY planet_id, resource_id').all(),
 });
-check(fingerprint(db) === fingerprint(db2), 'même seed → univers identique (reproductible)');
-db2.close();
+check(fingerprint(db) === fingerprint(dbScn), 'même seed → univers identique (reproductible)');
+dbScn.close();
 
 // ── 3. Choix de deux cas démonstratifs ───────────────────────────
 
@@ -1054,6 +1058,7 @@ const postId = postBought.id;
 const buyOrder = setPostOrder(db, postId, postTarget.resource_id, 'buy', postTarget.price * 3, 40);
 check(buyOrder.ok, buyOrder.ok && `ordre permanent : ACHAT ${buyOrder.name} ≤ ${buyOrder.limitPrice.toFixed(2)} cr (40/tick)`);
 
+const stockBefore = postTarget.stock;
 for (let i = 0; i < 3; i++) runTick(db);
 
 const postAfterBuy = listPosts(db)[0];
@@ -1064,8 +1069,10 @@ const marketAfterBuy = db.prepare(
 check(Boolean(heldByPost) && heldByPost.quantity >= 100 && heldByPost.avg_cost > 0,
   `le comptoir accapare sans vaisseau : ${heldByPost?.quantity.toFixed(0)} u en entrepôt en 3 ticks`
   + ` (coût moyen ${heldByPost?.avg_cost.toFixed(2)} cr)`);
-check(marketAfterBuy.price > postTarget.price,
-  `l'accaparement pèse sur le marché : prix ${postTarget.price.toFixed(2)} → ${marketAfterBuy.price.toFixed(2)} cr`);
+// L'accaparement draine l'offre locale (le moteur de prix la traduit en
+// hausse ; on mesure le drainage, robuste à la réversion vers l'équilibre).
+check(marketAfterBuy.stock < stockBefore - 80,
+  `l'accaparement assèche le marché : stock ${stockBefore.toFixed(0)} → ${marketAfterBuy.stock.toFixed(0)} u`);
 check(postAfterBuy.orders[0].last_qty > 0,
   `retour d'exécution : ${postAfterBuy.orders[0].last_qty} u au dernier tick à ${postAfterBuy.orders[0].last_price.toFixed(2)} cr`);
 
@@ -1119,8 +1126,95 @@ const inProgress = objectives.find((o) => !o.done && o.progress[0].goal > 0);
 check(Boolean(inProgress) && inProgress.progress[0].value <= inProgress.progress[0].goal,
   `progression suivie : « ${inProgress?.name} » à ${inProgress?.progress[0].value}/${inProgress?.progress[0].goal} ${inProgress?.progress[0].label}`);
 
+// ── Phase 11 : maison de commerce, QG, rivaux, scénarios, stats ──
+
+console.log('\n■ Phase 11 — Maison de commerce et quartier général\n');
+
+// Identité : la partie a une maison nommée, un blason, un rang de renom.
+const house = getHouse(db);
+check(typeof house.name === 'string' && house.name.length > 0 && /^#[0-9a-f]{6}$/i.test(house.color),
+  `maison « ${house.name} » (blason ${house.color}), rang « ${house.renown.title} »`);
+check(renownOf(0).title === 'Colporteur' && renownOf(99999).title === 'Magnat du Nexus',
+  'le rang de renom suit le prestige (Colporteur → Magnat du Nexus)');
+
+// Quartier général : construction, bonus câblés (entretien, plafond flotte).
+db.prepare('UPDATE player SET credits = 700000 WHERE id = 1').run();
+const flagshipShip = getShip(db);
+db.prepare('UPDATE ships SET planet_id = ? WHERE id = ?')
+  .run(listConcessions(db)[0].planet_id, flagshipShip.id);
+const upkeepBefore = fleetUpkeep(db);
+const fleetCapBefore = maxFleet(db);
+const hqBuilt = buildHQ(db, flagshipShip.id);
+const upkeepAfter = fleetUpkeep(db);
+check(hqBuilt.ok && hqBonuses(db).level === 1,
+  hqBuilt.ok && `QG bâti sur ${hqBuilt.planetName} (${fmt(hqBuilt.cost)} cr)`);
+check(upkeepAfter < upkeepBefore && maxFleet(db) === fleetCapBefore + 3,
+  `bonus du QG câblés : entretien ${upkeepBefore} → ${upkeepAfter}, plafond flotte +3`);
+const hqUp = upgradeHQ(db);
+check(hqUp.ok && hqUp.level === 2 && hqBonuses(db).maxFleetBonus === 6,
+  hqUp.ok && `QG niveau 2 : plafond flotte +6, entretien −30 %`);
+
+console.log('\n■ Phase 11 — Maisons de commerce rivales\n');
+
+// Initialisation des rivaux (le verify ne passe pas par game.js).
+const rivalInit = initRivals(db);
+check(rivalInit.rivals >= 2
+  && db.prepare('SELECT COUNT(*) AS n FROM rivals').get().n === rivalInit.rivals,
+  `${rivalInit.rivals} maisons rivales fondées, chacune dotée d'un capital`);
+
+// Elles agissent : arbitrage et/ou accaparement sur plusieurs ticks ;
+// au moins une opération doit aboutir, et la valeur nette se met à jour.
+const dealsBefore = db.prepare('SELECT COALESCE(SUM(deals_done),0) AS n FROM rivals').get().n;
+for (let i = 0; i < 20; i++) runTick(db);
+const dealsAfter = db.prepare('SELECT COALESCE(SUM(deals_done),0) AS n FROM rivals').get().n;
+check(dealsAfter > dealsBefore,
+  `les rivaux commercent réellement sur les marchés : ${dealsAfter} opérations cumulées`);
+check(db.prepare('SELECT COUNT(*) AS n FROM rivals WHERE net_worth > 0').get().n === rivalInit.rivals,
+  'la valeur nette de chaque maison est suivie tick après tick');
+check(db.prepare("SELECT COUNT(*) AS n FROM networth_history WHERE subject = 'player'").get().n >= 1,
+  'l\'historique de valeur nette (joueur + rivaux) est échantillonné pour le graphe');
+
+console.log('\n■ Phase 11 — Statistiques et classement\n');
+
+const nw = netWorthBreakdown(db);
+check(nw.total > 0 && nw.parts.credits > 0 && nw.parts.hq > 0,
+  `patrimoine décomposé : ${fmt(nw.total)} cr (dont QG ${fmt(nw.parts.hq)} cr immobilisés)`);
+const board = leaderboard(db);
+const meEntry = board.find((e) => e.isPlayer);
+check(board.length === rivalInit.rivals + 1 && Boolean(meEntry) && meEntry.rank >= 1,
+  `classement des ${board.length} maisons : vous êtes ${meEntry.rank}e sur ${board.length}`);
+const snap = statsSnapshot(db);
+check(snap.counts.fleet >= 1 && typeof snap.rank === 'number' && Array.isArray(snap.leaderboard),
+  'snapshot complet (valeur nette, rang, compteurs, historique) servi à l\'UI');
+
+console.log('\n■ Phase 11 — Scénarios de départ\n');
+
+// Un scénario alternatif applique bien ses paramètres (sur une DB neuve).
+const dbHeir = createDb(':memory:');
+generateUniverse(dbHeir, SEED);
+generateFactions(dbHeir);
+const heir = initPlayer(dbHeir, { scenarioId: 'heritier', houseName: 'Maison Test' });
+const heirPlayer = getPlayer(dbHeir);
+const heirFleet = dbHeir.prepare('SELECT COUNT(*) AS n FROM ships').get().n;
+check(heir.scenario.id === 'heritier' && heirPlayer.credits === SCENARIO_BY_ID.heritier.credits
+  && heirPlayer.licence_tier === 2 && heirFleet === 2
+  && heirPlayer.house_name === 'Maison Test',
+  `scénario « Héritier » : ${fmt(heirPlayer.credits)} cr, ${heirFleet} vaisseaux, licence T2, maison nommée`);
+const refugee = (() => {
+  const d = createDb(':memory:');
+  generateUniverse(d, SEED);
+  generateFactions(d);
+  const r = initPlayer(d, { scenarioId: 'refugie' });
+  const ok = getPlayer(d).credits === 500 && listConcessions(d).length === 0;
+  d.close();
+  return ok;
+})();
+check(refugee, 'scénario « Réfugié » : 500 cr, aucune concession (tout à reconquérir)');
+dbHeir.close();
+
 db.close();
 console.log(failures
   ? `\n✗ ${failures} contrôle(s) en échec\n`
-  : '\n✓ Phases 1 à 10 vérifiées : économie, guerres, flotte, industrie, routes, investissements, prêts, contrebande, comptoirs et objectifs OK\n');
+  : '\n✓ Phases 1 à 11 vérifiées : économie, guerres, flotte, industrie, routes, '
+    + 'investissements, prêts, contrebande, comptoirs, objectifs, maison/QG, rivaux et scénarios OK\n');
 process.exit(failures ? 1 : 0);

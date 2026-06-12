@@ -17,7 +17,12 @@ import { BIOMES } from '../../data/biomes.js';
 import {
   initPlayer, getPlayer, getShip, getFleet, getCargo, cargoUsed, tierOf, hasTierAccess,
 } from '../player/state.js';
-import { buyShip, setShipMode, fleetUpkeep } from '../player/shipyard.js';
+import { buyShip, setShipMode, fleetUpkeep, maxFleet } from '../player/shipyard.js';
+import {
+  getHouse, renameHouse, setHouseColor, buildHQ, upgradeHQ,
+} from '../player/house.js';
+import { statsSnapshot } from '../player/stats.js';
+import { SCENARIOS } from '../../data/scenarios.js';
 import { createRoute, listRoutes, deleteRoute, assignRoute } from '../player/routes.js';
 import {
   investIndustry, divestIndustry, foundIndustry, listInvestments, industryValuation, getShare,
@@ -401,7 +406,7 @@ export function createApiRouter(db, clock) {
       ships,
       ship: ships[0], // compatibilité : le vaisseau-amiral
       shipClasses: CONFIG.SHIPS.CLASSES,
-      maxFleet: CONFIG.SHIPS.MAX_FLEET,
+      maxFleet: maxFleet(db),
       fleetUpkeep: fleetUpkeep(db),
       concessions,
       nextConcessionPrice: CONFIG.PLAYER.FACILITIES.CONCESSION_BASE_PRICE
@@ -668,6 +673,41 @@ export function createApiRouter(db, clock) {
   // ── Objectifs / fin de partie ───────────────────────────────────
   router.get('/objectives', (req, res) => {
     res.json(listObjectives(db));
+  });
+
+  // ── Maison de commerce : identité + quartier général ────────────
+  router.get('/house', (req, res) => {
+    res.json(getHouse(db));
+  });
+
+  router.post('/house/rename', (req, res) => {
+    answer(res, renameHouse(db, req.body?.name));
+  });
+
+  router.post('/house/color', (req, res) => {
+    answer(res, setHouseColor(db, req.body?.color));
+  });
+
+  router.post('/hq/build', (req, res) => {
+    const shipId = parseShipId(req.body?.shipId);
+    if (shipId === null) return res.status(400).json({ error: 'shipId invalide' });
+    answer(res, buildHQ(db, shipId));
+  });
+
+  router.post('/hq/upgrade', (req, res) => {
+    answer(res, upgradeHQ(db));
+  });
+
+  // ── Statistiques & classement des maisons ───────────────────────
+  router.get('/stats', (req, res) => {
+    res.json(statsSnapshot(db));
+  });
+
+  // ── Catalogue des scénarios de départ ───────────────────────────
+  router.get('/scenarios', (req, res) => {
+    res.json(SCENARIOS.map((s) => ({
+      id: s.id, name: s.name, desc: s.desc, difficulty: s.difficulty,
+    })));
   });
 
   // ── Renseignement ──────────────────────────────────────────────

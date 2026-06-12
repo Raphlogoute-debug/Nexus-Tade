@@ -318,6 +318,40 @@ CREATE TABLE IF NOT EXISTS world_events (
   message    TEXT NOT NULL,
   faction_id INTEGER
 );
+
+-- Maisons de commerce rivales (Phase 11) : des concurrents nommés qui
+-- arbitrent et accaparent sur les vrais marchés. cornering_* décrit un
+-- accaparement en cours (ressource, planète, tick de fin).
+CREATE TABLE IF NOT EXISTS rivals (
+  id                  INTEGER PRIMARY KEY,
+  name                TEXT NOT NULL,
+  color               TEXT NOT NULL,
+  credits             REAL NOT NULL,
+  net_worth           REAL NOT NULL DEFAULT 0,
+  home_planet_id      INTEGER,
+  cornering_resource  TEXT,
+  cornering_planet_id INTEGER,
+  cornering_until     INTEGER,
+  deals_done          INTEGER NOT NULL DEFAULT 0
+);
+
+-- Réserves d'une maison rivale (ce qu'elle a accaparé et pas encore écoulé).
+CREATE TABLE IF NOT EXISTS rival_holdings (
+  rival_id    INTEGER NOT NULL,
+  resource_id TEXT NOT NULL,
+  quantity    REAL NOT NULL DEFAULT 0,
+  avg_cost    REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY (rival_id, resource_id)
+);
+
+-- Historique de valeur nette (échantillonné) : joueur et rivaux, pour le
+-- graphe de classement. subject = 'player' ou 'rival:<id>'.
+CREATE TABLE IF NOT EXISTS networth_history (
+  subject TEXT NOT NULL,
+  tick    INTEGER NOT NULL,
+  value   REAL NOT NULL,
+  PRIMARY KEY (subject, tick)
+);
 `;
 
 // Colonnes ajoutées après coup (migration douce des parties existantes).
@@ -332,6 +366,11 @@ const MIGRATIONS = [
   // Trajets visibles sur la carte : il faut savoir d'où part un marchand.
   { table: 'traders', column: 'from_planet_id', ddl: 'ALTER TABLE traders ADD COLUMN from_planet_id INTEGER' },
   { table: 'traders', column: 'departure_tick', ddl: 'ALTER TABLE traders ADD COLUMN departure_tick INTEGER' },
+  // Maison de commerce du joueur (Phase 11) : identité + quartier général.
+  { table: 'player', column: 'house_name', ddl: 'ALTER TABLE player ADD COLUMN house_name TEXT' },
+  { table: 'player', column: 'house_color', ddl: 'ALTER TABLE player ADD COLUMN house_color TEXT' },
+  { table: 'player', column: 'hq_planet_id', ddl: 'ALTER TABLE player ADD COLUMN hq_planet_id INTEGER' },
+  { table: 'player', column: 'hq_level', ddl: 'ALTER TABLE player ADD COLUMN hq_level INTEGER NOT NULL DEFAULT 0' },
 ];
 
 export function createDb(path) {
@@ -409,6 +448,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
+      'networth_history', 'rival_holdings', 'rivals',
       'objectives', 'post_orders', 'post_storage', 'trading_posts',
       'loans', 'industry_shares', 'route_stops', 'routes',
       'player_tech', 'facility_workshops', 'facility_storage', 'concessions',
