@@ -675,6 +675,29 @@ tr.tier-row.collapsible:hover td { color: var(--accent); }
 .metric-head strong { font-family: var(--mono); font-size: 15px; font-weight: 700; }
 .metric-spark { display: block; width: 100%; height: 46px; }
 
+/* Infobulle de ressource (survol des marchés). */
+#res-tip {
+  position: fixed;
+  z-index: 30;
+  pointer-events: none;
+  width: 210px;
+  padding: 9px 11px;
+  background: rgba(13, 17, 25, 0.97);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(4px);
+  font-size: 12px;
+}
+.tip-name { display: flex; align-items: center; gap: 4px; margin-bottom: 7px; }
+.tip-name strong { font-size: 13px; }
+.tip-cat { margin-left: auto; font-size: 10px; font-weight: 600; }
+.tip-row { display: flex; justify-content: space-between; gap: 10px; margin: 2px 0; }
+.tip-row span:first-child { color: var(--dim); }
+.tip-spark-wrap { margin: 7px 0 4px; }
+.tip-spark { display: block; width: 100%; height: 34px; }
+.tip-verdict { margin-top: 4px; font-size: 11px; }
+
 /* ── Table des ressources ───────────────────────────────────── */
 
 table { width: 100%; border-collapse: collapse; font-size: 12px; }

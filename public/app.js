@@ -2151,6 +2151,7 @@ function renderDockedPanel(planet, market) {
       });
     }
   }
+  bindResTips(market); // infobulles enrichies au survol des ressources
 
   if (shipHere && state.tradeSel) {
     const res = market.prices.find((r) => r.resource_id === state.tradeSel);
@@ -2573,7 +2574,7 @@ async function renderRemotePanel(planet, market) {
         const ratio = r.price / r.basePrice;
         const priceCls = ratio >= 1.25 ? 'price-high' : ratio <= 0.8 ? 'price-low' : '';
         html += `
-          <tr>
+          <tr data-res="${r.resource_id}">
             <td class="res-name">${resChip(r.resource_id, r.name)}</td>
             <td>${r.stock === null ? '?' : fmtQty(r.stock)}</td>
             <td class="${priceCls}" title="base : ${fmtPrice.format(r.basePrice)}">${fmtPrice.format(r.price)}</td>
@@ -2591,6 +2592,7 @@ async function renderRemotePanel(planet, market) {
   if (myConcession) bindMissionSection(planet);
   bindClientsSection();
   bindLinkRoute(planet);
+  bindResTips(market); // infobulles enrichies (prix vs base, stock)
 
   // Bouton voyage (préparé en asynchrone) — pour le vaisseau piloté.
   const ship = selectedShip();
@@ -3942,6 +3944,67 @@ async function renderFactionPanel(factionId) {
 }
 
 // Tendance de prix sur l'historique (~5 ticks).
+// ── Infobulle de ressource (survol des marchés) ──────────────────
+// Une carte flottante : identité (famille), prix vs base avec écart en %,
+// stock, et un mini-graphe de l'historique de prix quand on le connaît.
+const resTip = $('#res-tip');
+panel.addEventListener('mouseleave', hideResTip); // filet : sortie du panneau
+
+function priceSparkSvg(points, color, w = 150, h = 34) {
+  if (!points || points.length < 2) return '';
+  const vals = points.map((p) => p.price);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = max - min || 1;
+  const x = (i) => (i / (vals.length - 1)) * w;
+  const y = (v) => h - 2 - ((v - min) / span) * (h - 4);
+  const line = vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+  return `<svg width="${w}" height="${h}" class="tip-spark">
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="1.4"/></svg>`;
+}
+
+function showResTip(rid, market, ev) {
+  const r = market.prices.find((x) => x.resource_id === rid);
+  if (!r) return;
+  const cat = resCats[resById.get(rid)?.cat];
+  const ratio = r.price / r.basePrice;
+  const pct = Math.round((ratio - 1) * 100);
+  const pCls = ratio >= 1.25 ? 'price-high' : ratio <= 0.8 ? 'price-low' : '';
+  const verdict = ratio <= 0.8 ? '<span class="price-low">▼ bon marché — à charger</span>'
+    : ratio >= 1.25 ? '<span class="price-high">▲ cher — à vendre ici</span>'
+      : '<span style="color:var(--dim)">≈ proche du prix de base</span>';
+  const hist = market.history?.[rid];
+  resTip.innerHTML = `
+    <div class="tip-name">${resGlyph(rid)}<strong>${r.name}</strong>
+      ${cat ? `<span class="tip-cat" style="color:${cat.color}">${cat.label}</span>` : ''}</div>
+    <div class="tip-row"><span>Prix</span><span class="${pCls}">${fmtPrice.format(r.price)} cr
+      <span style="color:var(--dim)">(${pct >= 0 ? '+' : ''}${pct} % vs base)</span></span></div>
+    ${r.stock != null ? `<div class="tip-row"><span>Stock</span><span>${fmtQty(r.stock)}</span></div>` : ''}
+    ${hist ? `<div class="tip-spark-wrap">${priceSparkSvg(hist, cat?.color ?? '#5ccdf5')}</div>` : ''}
+    <div class="tip-verdict">${verdict}</div>`;
+  resTip.hidden = false;
+  const pad = 14;
+  let x = ev.clientX + pad;
+  let y = ev.clientY + pad;
+  const box = resTip.getBoundingClientRect();
+  if (x + box.width > window.innerWidth - 8) x = ev.clientX - box.width - pad;
+  if (y + box.height > window.innerHeight - 8) y = ev.clientY - box.height - pad;
+  resTip.style.left = `${Math.max(8, x)}px`;
+  resTip.style.top = `${Math.max(8, y)}px`;
+}
+
+function hideResTip() { resTip.hidden = true; }
+
+// Branche les infobulles sur toutes les lignes de marché (data-res) du
+// panneau. Appelé après chaque rendu de table de marché.
+function bindResTips(market) {
+  for (const row of panel.querySelectorAll('tr[data-res]')) {
+    const rid = row.dataset.res;
+    row.addEventListener('mousemove', (ev) => showResTip(rid, market, ev));
+    row.addEventListener('mouseleave', hideResTip);
+  }
+}
+
 function computeTrends(market) {
   const trends = {};
   for (const [rid, points] of Object.entries(market.history ?? {})) {
