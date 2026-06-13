@@ -3110,6 +3110,7 @@ async function openSavesOverlay() {
   for (const btn of list.querySelectorAll('.load-save')) {
     btn.addEventListener('click', async () => {
       await apiPost('/saves/load', { file: btn.dataset.file });
+      try { sessionStorage.setItem('nx-entered', '1'); } catch { /* privé */ }
       location.reload(); // on repart sur la partie chargée
     });
   }
@@ -3155,7 +3156,10 @@ $('#new-save-go').addEventListener('click', async () => {
   };
   if (seedRaw) body.seed = Number(seedRaw);
   const r = await apiPost('/saves/new', body);
-  if (r.ok) location.reload();
+  if (r.ok) {
+    try { sessionStorage.setItem('nx-entered', '1'); } catch { /* privé */ }
+    location.reload();
+  }
   else log(`Création refusée : ${r.error}`);
 });
 
@@ -3861,4 +3865,25 @@ async function init() {
   setInterval(poll, POLL_MS);
 }
 
+// ── Écran-titre : le premier contact ─────────────────────────────
+// Affiché à chaque nouvel onglet ; « Continuer » se fond dans la partie
+// en cours, « Nouvelle partie » ouvre le menu. Une fois entré, on n'y
+// revient pas (les rechargements liés au changement de partie le sautent).
+function dismissTitle() {
+  try { sessionStorage.setItem('nx-entered', '1'); } catch { /* privé */ }
+  const t = $('#title-screen');
+  t.classList.add('fade');
+  setTimeout(() => { t.hidden = true; }, 750);
+}
+
+function setupTitle() {
+  const entered = (() => {
+    try { return sessionStorage.getItem('nx-entered') === '1'; } catch { return false; }
+  })();
+  if (entered) { $('#title-screen').hidden = true; return; }
+  $('#title-continue').addEventListener('click', dismissTitle);
+  $('#title-new').addEventListener('click', () => { dismissTitle(); openSavesOverlay(); });
+}
+
+setupTitle();
 init();
