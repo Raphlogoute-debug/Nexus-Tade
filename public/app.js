@@ -1082,6 +1082,72 @@ function drawCompass(t) {
   ctx.restore();
 }
 
+// — Mini-carte : vue d'ensemble en coin avec rectangle de visée ——
+// Apparaît dès qu'on zoome (sinon redondante). Cliquable : on saute la
+// caméra à l'endroit pointé. Coordonnées écran fixes (bas-gauche).
+let minimapRect = null;
+function drawMinimap() {
+  minimapRect = null;
+  const v = state.view;
+  if (v.zoom < 1.35) return;
+  const m = state.universe.mapSize;
+  const size = Math.min(150, v.w * 0.16);
+  const pad = 12;
+  const box = { x: pad, y: v.h - size - 34, w: size, h: size };
+  minimapRect = box;
+  const k = size / m;
+  const mx = (x) => box.x + x * k;
+  const my = (y) => box.y + y * k;
+
+  // Cadre.
+  ctx.fillStyle = 'rgba(9,12,18,0.78)';
+  ctx.strokeStyle = 'rgba(60,72,92,0.8)';
+  ctx.lineWidth = 1;
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+  ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w, box.h);
+
+  // Systèmes : points teintés par faction.
+  for (const sys of state.universe.systems) {
+    const f = sys.faction_id !== null ? state.factionById.get(sys.faction_id) : null;
+    ctx.fillStyle = f ? withAlpha(f.color, 0.85) : 'rgba(150,170,195,0.6)';
+    ctx.fillRect(mx(sys.x) - 0.5, my(sys.y) - 0.5, 1.6, 1.6);
+  }
+  // Vos installations en ambre.
+  ctx.fillStyle = 'rgba(236,184,95,0.95)';
+  for (const c of state.player?.concessions ?? []) {
+    const e = state.planetIndex.get(c.planet_id);
+    if (e) ctx.fillRect(mx(e.system.x) - 1, my(e.system.y) - 1, 2.4, 2.4);
+  }
+  // Vaisseau piloté : pastille cyan.
+  const pos = shipMapPosition(selectedShip());
+  if (pos) {
+    ctx.fillStyle = '#5ccdf5';
+    ctx.beginPath();
+    ctx.arc(mx(pos.x), my(pos.y), 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Rectangle de visée : la portion de galaxie actuellement à l'écran.
+  const [tlx, tly] = toMap(0, 0);
+  const [brx, bry] = toMap(v.w, v.h);
+  const rx = Math.max(box.x, mx(Math.max(0, tlx)));
+  const ry = Math.max(box.y, my(Math.max(0, tly)));
+  const rw = Math.min(box.x + box.w, mx(Math.min(m, brx))) - rx;
+  const rh = Math.min(box.y + box.h, my(Math.min(m, bry))) - ry;
+  ctx.strokeStyle = 'rgba(92,205,245,0.9)';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(rx, ry, Math.max(2, rw), Math.max(2, rh));
+}
+
+// Clic dans la mini-carte → coordonnées carte (ou null).
+function minimapAt(px, py) {
+  if (!minimapRect) return null;
+  const b = minimapRect;
+  if (px < b.x || py < b.y || px > b.x + b.w || py > b.y + b.h) return null;
+  const m = state.universe.mapSize;
+  return [(px - b.x) / b.w * m, (py - b.y) / b.h * m];
+}
+
 // — Image complète ————————————————————————————————————————————
 
 function drawMap(t = performance.now() / 1000) {
@@ -1097,6 +1163,7 @@ function drawMap(t = performance.now() / 1000) {
   drawFleet(t);
   drawFloaters();
   drawCompass(t);
+  drawMinimap();
 }
 
 let renderLoopStarted = false;
@@ -1212,6 +1279,14 @@ window.addEventListener('mouseup', (e) => {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
+    // Mini-carte : saut de caméra à l'endroit pointé.
+    const jump = minimapAt(mx, my);
+    if (jump) {
+      state.view.cx = jump[0];
+      state.view.cy = jump[1];
+      clampView();
+      return;
+    }
     // La boussole hors-champ : un clic recentre sur le vaisseau.
     if (compassHit && Math.hypot(mx - compassHit.x, my - compassHit.y) <= compassHit.r) {
       centerOnShip();
@@ -1250,6 +1325,14 @@ canvas.addEventListener('mousemove', (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
+
+  // Au-dessus de la mini-carte : pointeur, pas d'infobulle système.
+  if (minimapAt(mx, my)) {
+    state.hoverSystem = null;
+    canvas.style.cursor = 'pointer';
+    tooltip.hidden = true;
+    return;
+  }
 
   // Une planète en orbite sous le curseur : étiquette dédiée (biome,
   // population, tier), priorité sur l'étoile.
@@ -2971,6 +3054,39 @@ function lineSpark(points, color, w = 350, h = 56) {
   </svg>`;
 }
 
+// Carte de métrique (observatoire) : titre, valeur courante en gros, et
+// la courbe avec aire remplie en dégradé — un vrai mini tableau de bord.
+let sparkSeq = 0;
+function metricCard(label, points, color, unit) {
+  const cur = points.length ? points[points.length - 1].v : 0;
+  let chart;
+  if (points.length < 2) {
+    chart = '<div class="hint" style="font-size:11px">historique en cours d\'accumulation…</div>';
+  } else {
+    const w = 340; const h = 46;
+    const max = Math.max(...points.map((p) => p.v));
+    const min = Math.min(0, ...points.map((p) => p.v));
+    const span = max - min || 1;
+    const x = (i) => (i / (points.length - 1)) * w;
+    const y = (v) => h - 3 - ((v - min) / span) * (h - 8);
+    const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
+    const area = `M0 ${h} L${line.slice(1)} L${w} ${h} Z`;
+    const id = `sg${sparkSeq++}`;
+    chart = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="metric-spark">
+      <defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0" stop-color="${color}" stop-opacity="0.32"/>
+        <stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+      <path d="${area}" fill="url(#${id})"/>
+      <path d="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+  }
+  return `<div class="metric-card">
+    <div class="metric-head"><span>${label}</span>
+      <strong style="color:${color}">${fmtQty(cur)}${unit ? ' ' + unit : ''}</strong></div>
+    ${chart}
+  </div>`;
+}
+
 async function renderObservatoryPanel() {
   animatePanelOnce();
   const obs = await api('/observatory');
@@ -2986,12 +3102,10 @@ async function renderObservatoryPanel() {
     <button class="back-link" id="back-to-system">← retour</button>
     <h2 class="panel-title">Observatoire économique</h2>
     <p class="panel-sub">Les courbes de l'empire, ses chantiers et ses menaces.</p>
-    <div class="section-label">Chiffre d'affaires / jour</div>
-    ${lineSpark(deltas('revenue'), '#5fd68b')}
-    <div class="section-label">Unités vendues / jour</div>
-    ${lineSpark(deltas('units_sold'), '#53c7f0')}
-    <div class="section-label">Trésorerie</div>
-    ${lineSpark(hist.map((p) => ({ v: p.credits })), '#e8b35a')}
+    <div class="section-label">Activité de l'empire</div>
+    ${metricCard('Chiffre d\'affaires / jour', deltas('revenue'), '#62db90', 'cr')}
+    ${metricCard('Unités vendues / jour', deltas('units_sold'), '#5ccdf5', '')}
+    ${metricCard('Trésorerie', hist.map((p) => ({ v: p.credits })), '#ecb85f', 'cr')}
   `;
 
   html += `<div class="section-label">Routes par recettes (${obs.routes.length})</div>`;
