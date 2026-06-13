@@ -196,6 +196,13 @@ export const CONFIG = {
       DEFAULT_NAMES: ['Comptoir Vasari', 'Guilde Orhane', 'Maison Téra',
         'Consortium Lyre', 'Compagnie Solenne', 'Frères Aldenn'],
       CREST_COLORS: ['#53c7f0', '#e8b35a', '#5fd68b', '#c77dff', '#f07861', '#56c4c4'],
+      // Le renom suit le prestige cumulé (≈ profit à vie). Les premiers
+      // rangs s'enchaînent en début de partie ; les grands titres sont une
+      // ascension de fond de partie qui donne du sens aux gros chiffres —
+      // mesuré sur longue partie, on passe ~1,2 M de prestige vers 2 500
+      // jours, et « Mythe du Nexus » reste une aspiration de toute une
+      // carrière. Sans ces paliers, le prestige plafonnait de sens à
+      // « Magnat » et le compteur ne voulait plus rien dire.
       RENOWN: [
         { at: 0, title: 'Colporteur' },
         { at: 200, title: 'Négociant' },
@@ -203,6 +210,11 @@ export const CONFIG = {
         { at: 3000, title: 'Armateur notable' },
         { at: 8000, title: 'Prince marchand' },
         { at: 20000, title: 'Magnat du Nexus' },
+        { at: 75000, title: 'Potentat marchand' },
+        { at: 250000, title: 'Archonte du commerce' },
+        { at: 800000, title: 'Souverain des routes' },
+        { at: 2500000, title: 'Légende vivante' },
+        { at: 8000000, title: 'Mythe du Nexus' },
       ],
     },
 

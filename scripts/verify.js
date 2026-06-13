@@ -1144,8 +1144,9 @@ console.log('\n■ Phase 11 — Maison de commerce et quartier général\n');
 const house = getHouse(db);
 check(typeof house.name === 'string' && house.name.length > 0 && /^#[0-9a-f]{6}$/i.test(house.color),
   `maison « ${house.name} » (blason ${house.color}), rang « ${house.renown.title} »`);
-check(renownOf(0).title === 'Colporteur' && renownOf(99999).title === 'Magnat du Nexus',
-  'le rang de renom suit le prestige (Colporteur → Magnat du Nexus)');
+check(renownOf(0).title === 'Colporteur' && renownOf(50000).title === 'Magnat du Nexus'
+  && renownOf(9000000).title === 'Mythe du Nexus' && renownOf(9000000).next === null,
+  'le rang de renom suit le prestige (Colporteur → Magnat → … → Mythe du Nexus)');
 
 // Quartier général : construction, bonus câblés (entretien, plafond flotte).
 db.prepare('UPDATE player SET credits = 700000 WHERE id = 1').run();
