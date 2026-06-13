@@ -698,6 +698,21 @@ tr.tier-row.collapsible:hover td { color: var(--accent); }
 .tip-spark { display: block; width: 100%; height: 34px; }
 .tip-verdict { margin-top: 4px; font-size: 11px; }
 
+/* Codex : fiches de ressources avec leur chaîne de production. */
+.codex-res {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  margin: 5px 0;
+  font-size: 12px;
+}
+.codex-res-head { display: flex; justify-content: space-between; align-items: baseline; }
+.codex-base { font-family: var(--mono); color: var(--amber); font-size: 12px; }
+.codex-chain { color: var(--text); margin-top: 4px; font-size: 11px; line-height: 1.5; }
+.codex-chain.io { color: var(--dim); }
+.codex-chain .rc-glyph { margin: 0 1px 0 2px; }
+
 /* ── Table des ressources ───────────────────────────────────── */
 
 table { width: 100%; border-collapse: collapse; font-size: 12px; }

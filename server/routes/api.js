@@ -124,6 +124,12 @@ export function createApiRouter(db, clock) {
         basePrice: RESOURCES[id].basePrice, cat: RESOURCES[id].cat,
       })),
       categories: CATEGORIES,
+      // Chaînes de production (pour le Codex) : id de recette, produit,
+      // intrants. Données statiques, chargées une fois.
+      recipes: Object.entries(RECIPES).map(([id, r]) => ({
+        id, output: recipeOutput(id), inputs: r.inputs,
+        name: recipeName(id),
+      })),
     });
   });
 

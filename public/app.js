@@ -3182,6 +3182,81 @@ async function renderObservatoryPanel() {
 
 $('#btn-eco').addEventListener('click', renderObservatoryPanel);
 
+// ── Panneau : Codex — comprendre l'économie ──────────────────────
+// Référence : familles de ressources, chaînes de production (qui fait
+// quoi, qui consomme quoi) et fiches de vaisseaux. Le « pourquoi » derrière
+// les prix — maîtriser la chaîne, c'est maîtriser les marges.
+function renderCodexPanel() {
+  animatePanelOnce();
+  state.selectedPlanet = null;
+  const u = state.universe;
+  const recipes = u.recipes ?? [];
+  const byOutput = new Map(); // ressource produite → recettes
+  const usedIn = new Map();   // ressource consommée → produits
+  for (const r of recipes) {
+    if (!byOutput.has(r.output)) byOutput.set(r.output, []);
+    byOutput.get(r.output).push(r);
+    for (const inp of Object.keys(r.inputs)) {
+      if (!usedIn.has(inp)) usedIn.set(inp, new Set());
+      usedIn.get(inp).add(r.output);
+    }
+  }
+
+  let html = `
+    <button class="back-link" id="back-to-system">← retour</button>
+    <h2 class="panel-title">Codex</h2>
+    <p class="panel-sub">L'économie expliquée : familles, chaînes de
+      production, vaisseaux. Survolez un marché pour le prix en direct.</p>
+    <div class="cat-legend">${Object.values(resCats).map((c) =>
+      `<span><span class="rc-glyph" style="color:${c.color}">${c.glyph}</span>${c.label}</span>`).join('')}</div>`;
+
+  // Ressources par tier, avec leur chaîne (intrants → ressource → débouchés).
+  for (const tier of ['raw', 'intermediate', 'finished']) {
+    const list = u.resources.filter((r) => r.tier === tier);
+    html += `<div class="section-label">${TIER_LABELS[tier]} (${list.length})</div>`;
+    for (const r of list) {
+      const made = byOutput.get(r.id) ?? [];
+      const uses = [...(usedIn.get(r.id) ?? [])];
+      let chain = '';
+      if (made.length > 0) {
+        const inp = Object.entries(made[0].inputs)
+          .map(([id, q]) => `${q}× ${resGlyph(id)}${resName(id)}`).join(' + ');
+        chain += `<div class="codex-chain">⟵ ${inp}${made.length > 1 ? ` <span class="badge">${made.length} filières</span>` : ''}</div>`;
+      }
+      if (uses.length > 0) {
+        chain += `<div class="codex-chain io">⟶ ${uses.map((o) => `${resGlyph(o)}${resName(o)}`).join(', ')}</div>`;
+      }
+      if (made.length === 0 && uses.length === 0) chain = '<div class="codex-chain io">ressource de consommation</div>';
+      html += `<div class="codex-res">
+        <div class="codex-res-head">
+          <span>${resChip(r.id, r.name)}</span>
+          <span class="codex-base">${fmtPrice.format(r.basePrice)} cr</span>
+        </div>${chain}</div>`;
+    }
+  }
+
+  // Vaisseaux.
+  html += `<div class="section-label">Vaisseaux</div>`;
+  for (const [, c] of Object.entries(state.player?.shipClasses ?? {})) {
+    html += `<div class="info-block">
+      <div class="row"><span><strong>${c.label}</strong>${c.minTier ? ` <span class="badge locked">chantier T${c.minTier}</span>` : ''}</span>
+        <span>${fmtQty(c.price)} cr</span></div>
+      <div class="row"><span>Soute · vitesse · réservoir</span>
+        <span>${fmtQty(c.cargo)} · ${c.speed} · ${fmtQty(c.fuel)}</span></div>
+      <div class="row"><span>Entretien</span><span>${c.upkeep} cr/j</span></div>
+    </div>`;
+  }
+
+  panel.innerHTML = html;
+  enhancePanel();
+  $('#back-to-system').addEventListener('click', () => {
+    if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
+    else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
+  });
+}
+
+$('#btn-codex').addEventListener('click', renderCodexPanel);
+
 // ── Maison de commerce : identité, QG, classement, statistiques ───
 
 function renderHouseHeader() {
