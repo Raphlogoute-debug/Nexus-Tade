@@ -764,6 +764,65 @@ function drawSystems(t) {
   }
 }
 
+// — Planètes en orbite (au zoom) ——————————————————————————————
+// En zoomant, chaque système prend vie : ses planètes tournent autour de
+// l'étoile, anneaux d'orbite et couleurs de biome. Donne une raison de
+// zoomer et un ancrage spatial (la planète sélectionnée est mise en avant).
+function drawPlanetOrbits(t) {
+  const v = state.view;
+  if (v.zoom < 2.2 || state.heatmap || state.geoMap) return;
+  const fade = Math.min(1, (v.zoom - 2.2) / 1.2); // apparition progressive
+  const zr = Math.pow(v.zoom, 0.6);
+
+  for (const sys of state.universe.systems) {
+    const [sx, sy] = toScreen(sys.x, sys.y);
+    if (sx < -120 || sy < -120 || sx > v.w + 120 || sy > v.h + 120) continue;
+    const r0 = starRadius(sys);
+    sys.planets.forEach((p, i) => {
+      const orbit = r0 + (10 + i * 8) * zr;
+      const ang = t * (0.18 / (i + 1.2)) + i * 2.39996 + sys.id * 0.7;
+      const px = sx + Math.cos(ang) * orbit;
+      const py = sy + Math.sin(ang) * orbit * 0.62; // ellipse vue de biais
+      const isSel = state.selectedPlanet === p.id;
+
+      // Anneau d'orbite, très discret.
+      ctx.globalAlpha = fade * (isSel ? 0.35 : 0.13);
+      ctx.strokeStyle = isSel ? '#9fd8f4' : '#5b6b85';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, orbit, orbit * 0.62, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // La planète : pastille de biome avec petit halo.
+      const pr = (isSel ? 3.6 : 2.4) * Math.min(2.4, zr);
+      const col = BIOME_COLORS[p.biome] ?? '#9ab1c6';
+      ctx.globalAlpha = fade;
+      const grad = ctx.createRadialGradient(px, py, 0, px, py, pr * 2.2);
+      grad.addColorStop(0, col);
+      grad.addColorStop(0.5, withAlpha(col, 0.5));
+      grad.addColorStop(1, withAlpha(col, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(px, py, pr * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#eef4fb';
+      ctx.beginPath();
+      ctx.arc(px, py, pr * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (isSel) {
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = '#9fd8f4';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(px, py, pr + 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    });
+  }
+  ctx.globalAlpha = 1;
+}
+
 // — Vos installations : coins autour des systèmes où vous êtes établi —
 // ambre = concession (industrie), vert = comptoir (commerce).
 
@@ -928,6 +987,7 @@ function drawMap(t = performance.now() / 1000) {
   drawLanes();
   drawTraffic();
   drawSystems(t);
+  drawPlanetOrbits(t);
   drawPlayerAssets();
   drawFleet(t);
   drawFloaters();
