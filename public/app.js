@@ -295,7 +295,7 @@ function playSound(kind) {
   } catch { /* pas d'audio : tant pis, le jeu reste muet */ }
 }
 
-function toast(message, kind = 'info') {
+function toast(message, kind = 'info', ms = 4600) {
   const box = $('#toasts');
   if (!box) return;
   while (box.children.length >= 4) box.firstChild.remove();
@@ -303,9 +303,16 @@ function toast(message, kind = 'info') {
   el.className = `toast ${kind}`;
   el.textContent = message;
   box.appendChild(el);
-  setTimeout(() => el.classList.add('out'), 4600);
-  setTimeout(() => el.remove(), 5200);
+  setTimeout(() => el.classList.add('out'), ms);
+  setTimeout(() => el.remove(), ms + 600);
 }
+
+// Drapeaux « une seule fois par partie » (mémorisés par seed) : sert aux
+// invites de découverte — par ex. expliquer la guerre la première fois
+// qu'elle éclate, sans jamais reharceler.
+function gameFlagKey(name) { return `nx-${name}-${state.universe?.seed ?? 0}`; }
+function gameFlag(name) { try { return localStorage.getItem(gameFlagKey(name)) === '1'; } catch { return false; } }
+function setGameFlag(name) { try { localStorage.setItem(gameFlagKey(name), '1'); } catch { /* navigation privée */ } }
 
 // Texte flottant sur la carte (coordonnées carte) : monte et s'efface.
 state.floaters = [];
@@ -4441,7 +4448,20 @@ async function pollEvents() {
     // le journal garde tout, les toasts ne gardent que ce qui compte.
     if (toasted < 3) {
       if (e.type === 'objective') { toast(e.message, 'good'); playSound('objective'); toasted++; }
-      else if (e.type === 'war') { toast(e.message, 'bad'); playSound('war'); toasted++; }
+      else if (e.type === 'war') {
+        // La première guerre de la partie : on explique l'opportunité (le
+        // cœur du jeu) au lieu d'une simple alerte. Le bouton ⚔ GUERRES
+        // brille déjà en rouge — on lui donne enfin son sens. Une seule fois.
+        if (!gameFlag('firstwar')) {
+          setGameFlag('firstwar');
+          toast('⚔ Première guerre ! Vous ne la combattez pas, vous la ravitaillez. '
+            + 'Ouvrez ⚔ GUERRES : pénuries payées au prix fort, prêts au vainqueur (×1,3), '
+            + 'contrats. Une guerre est votre meilleur client.', 'warn', 9000);
+        } else {
+          toast(e.message, 'bad');
+        }
+        playSound('war'); toasted++;
+      }
       else if (e.type === 'piracy' || e.type === 'seizure') { toast(e.message, 'bad'); playSound('alert'); toasted++; }
       else if (e.type === 'rival') { toast(e.message, 'warn'); toasted++; }
       else if (e.type === 'peace') { toast(e.message, 'info'); toasted++; }
