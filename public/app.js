@@ -3629,14 +3629,44 @@ function renderHudState(s) {
   }
 }
 
+// Compteur de crédits animé : il défile de l'ancienne à la nouvelle
+// valeur en ~0,5 s (la satisfaction de voir l'argent rentrer). Saut
+// direct si l'écart est énorme (chargement) ou négligeable.
+let creditsShown = null;
+let creditsAnim = null;
+function animateCredits(target, suffix) {
+  const el = $('#hud-credits');
+  if (!el) return;
+  if (creditsShown === null || Math.abs(target - creditsShown) < 1
+      || Math.abs(target - creditsShown) > 5e8) {
+    creditsShown = target;
+    el.textContent = `${fmtQty(target)} cr${suffix}`;
+    return;
+  }
+  cancelAnimationFrame(creditsAnim);
+  const from = creditsShown;
+  const start = performance.now();
+  const dur = 500;
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / dur);
+    const e = 1 - Math.pow(1 - t, 3); // ease-out cubique
+    creditsShown = from + (target - from) * e;
+    el.textContent = `${fmtQty(Math.round(creditsShown))} cr${suffix}`;
+    if (t < 1) creditsAnim = requestAnimationFrame(step);
+    else { creditsShown = target; el.textContent = `${fmtQty(target)} cr${suffix}`; }
+  };
+  creditsAnim = requestAnimationFrame(step);
+}
+
 function renderHudPlayer() {
   const p = state.player;
   const ship = selectedShip();
   if (!p || !ship) return;
   const dividends = (p.investments ?? []).reduce((s, i) => s + i.estimatedYield, 0);
   const flux = Math.round((dividends - p.fleetUpkeep) * 10) / 10;
-  $('#hud-credits').textContent = `${fmtQty(p.credits)} cr`
-    + (p.fleetUpkeep > 0 || dividends > 0 ? ` (${flux >= 0 ? '+' : ''}${fmtNum.format(flux)}/j)` : '');
+  const fluxStr = (p.fleetUpkeep > 0 || dividends > 0)
+    ? ` (${flux >= 0 ? '+' : ''}${fmtNum.format(flux)}/j)` : '';
+  animateCredits(p.credits, fluxStr); // le compteur défile vers sa valeur
   $('#hud-credits').classList.toggle('price-high', p.credits < 0);
   const nextTier = !p.tiers[2].unlocked ? 2 : !p.tiers[3].unlocked ? 3 : null;
   $('#hud-prestige').textContent = fmtQty(p.prestige)
