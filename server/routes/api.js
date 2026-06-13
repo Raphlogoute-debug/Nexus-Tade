@@ -62,6 +62,7 @@ import { marketContext } from '../economy/market.js';
 import { listContracts, deliverContract, contractAccess } from '../factions/contracts.js';
 import { activeWars, warContext } from '../factions/war.js';
 import { getStanding } from '../factions/standing.js';
+import { supportOf } from '../factions/influence.js';
 import { recentEvents } from '../events.js';
 
 // Param d'URL → id entier positif, ou null si invalide.
@@ -877,6 +878,7 @@ export function createApiRouter(db, clock) {
         fleet0: Math.round(war.attacker_id === f.id ? war.attacker_fleet0 : war.defender_fleet0),
         readiness: Math.round(f.readiness * 100) / 100,
         standing: Math.round(getStanding(db, f.id)),
+        support: Math.round(supportOf(db, f.id)),
         shortages,
         openLoans: db.prepare(
           "SELECT COALESCE(SUM(amount), 0) AS s FROM loans WHERE faction_id = ? AND status = 'open'"

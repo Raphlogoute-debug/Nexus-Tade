@@ -8,6 +8,7 @@ import { logEvent } from '../events.js';
 import { warContext } from './war.js';
 // Import circulaire bénin (appels à l'exécution seulement).
 import { pactActive } from './pacts.js';
+import { addSupport } from './influence.js';
 
 const S = CONFIG.STANDING;
 const STRATEGIC = new Set(Object.keys(CONFIG.FLEET.BUILD));
@@ -40,6 +41,8 @@ export function onPlayerSale(db, tick, planetFactionId, resourceId, quantity, to
 
   if (total > 0) {
     db.prepare('UPDATE player SET war_profit = ROUND(war_profit + ?, 2) WHERE id = 1').run(total);
+    // Armer un belligérant, c'est peser sur sa guerre.
+    addSupport(db, planetFactionId, (total / 1000) * CONFIG.INFLUENCE.SALE_PER_1000);
   }
 
   const gain = Math.round(quantity * S.STRATEGIC_PER_UNIT * 10) / 10;

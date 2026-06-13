@@ -9,6 +9,7 @@ import { RESOURCES } from '../../data/resources.js';
 import { getCurrentTick } from '../db.js';
 import { getPlayer, adjustCredits } from '../player/state.js';
 import { adjustStanding } from './standing.js';
+import { addSupport } from './influence.js';
 import { logEvent } from '../events.js';
 
 const L = CONFIG.LOANS;
@@ -53,6 +54,7 @@ export function issueLoan(db, factionId, amount) {
     const gain = (amount / 1000) * L.STANDING_PER_1000;
     adjustStanding(db, factionId, gain);
     adjustStanding(db, enemyId, -gain * CONFIG.STANDING.ENEMY_LEAK);
+    addSupport(db, factionId, (amount / 1000) * CONFIG.INFLUENCE.LOAN_PER_1000);
 
     logEvent(db, tick, 'loan',
       `FINANCE — vous prêtez ${Math.round(amount)} cr à ${faction.name} pour son effort de guerre`,

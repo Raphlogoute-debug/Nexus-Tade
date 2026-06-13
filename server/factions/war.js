@@ -7,6 +7,7 @@
 import { CONFIG } from '../config.js';
 import { logEvent } from '../events.js';
 import { resolveWarLoans } from './loans.js';
+import { attributeConquest, attributeWarEnd } from './influence.js';
 
 const W = CONFIG.WAR;
 
@@ -94,6 +95,9 @@ function conquerSystem(db, tick, war, systemId, winner) {
     .run(winner.id === war.attacker_id ? -0.5 : 0.5, war.id, systemId);
   logEvent(db, tick, 'conquest',
     `CONQUÊTE — ${system.name} tombe aux mains de ${winner.name}`, winner.id);
+  // Le profiteur : si vous armez nettement le vainqueur, le mérite est vôtre.
+  const loserId = winner.id === war.attacker_id ? war.defender_id : war.attacker_id;
+  attributeConquest(db, tick, winner.id, loserId, system.name);
 }
 
 function endWar(db, tick, war, result, attacker, defender) {
@@ -113,6 +117,10 @@ function endWar(db, tick, war, result, attacker, defender) {
   logEvent(db, tick, 'peace', message, null);
 
   resolveWarLoans(db, war, result, tick); // l'heure des comptes pour les créanciers
+  // Faiseur de rois : avez-vous armé le vainqueur ?
+  const winnerId = result === 'attacker' ? war.attacker_id
+    : result === 'defender' ? war.defender_id : null;
+  attributeWarEnd(db, tick, winnerId);
 }
 
 function round2(n) {

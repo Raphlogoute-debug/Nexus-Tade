@@ -215,6 +215,13 @@ CREATE TABLE IF NOT EXISTS faction_pacts (
   signed_tick INTEGER NOT NULL
 );
 
+-- Influence de guerre : soutien matériel (décroissant) du joueur à chaque
+-- faction. Sert à attribuer au joueur le mérite des conquêtes/victoires.
+CREATE TABLE IF NOT EXISTS war_support (
+  faction_id INTEGER PRIMARY KEY,
+  support    REAL NOT NULL DEFAULT 0
+);
+
 -- Phase 15 : sondages géologiques (la qualité des gisements se mémorise).
 CREATE TABLE IF NOT EXISTS deposit_surveys (
   planet_id     INTEGER PRIMARY KEY,
@@ -570,7 +577,7 @@ export function getCurrentTick(db) {
 export function wipe(db) {
   db.transaction(() => {
     for (const table of [
-      'empire_history', 'rival_concessions', 'pirate_lairs', 'colonies',
+      'war_support', 'empire_history', 'rival_concessions', 'pirate_lairs', 'colonies',
       'megaproject_needs', 'megaprojects', 'deposit_surveys',
       'faction_pacts', 'client_loyalty', 'supply_contracts', 'ship_equipment',
       'missions', 'networth_history', 'rival_holdings', 'rivals',

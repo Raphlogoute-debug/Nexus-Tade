@@ -375,6 +375,25 @@ export const CONFIG = {
     EXHAUSTION: 0.35,    // flotte sous 35 % de l'initiale → capitulation
   },
 
+  // Influence de guerre (faire le roi) : votre soutien matériel à un
+  // belligérant (ventes stratégiques, contrats, prêts) s'accumule en un
+  // « soutien » décroissant. Quand un camp que vous armez gagne du terrain
+  // ou la guerre, votre maison s'en voit attribuer le mérite — le fantasme
+  // de profiteur, rendu actif et visible.
+  INFLUENCE: {
+    DECAY: 0.985,            // le soutien reflète l'aide RÉCENTE
+    SALE_PER_1000: 1,        // soutien par 1000 cr de matériel stratégique vendu
+    CONTRACT_PER_1000: 1.5,  // les contrats de guerre pèsent plus
+    LOAN_PER_1000: 3,        // un prêt, c'est s'engager
+    ATTRIBUTION_MIN: 25,     // soutien requis pour qu'une conquête vous soit attribuée
+    DOMINANCE: 1.3,          // il faut soutenir le vainqueur > 1,3× l'autre camp
+    GAP_TICKS: 18,           // anti-spam des attributions de conquête
+    CONQUEST_PRESTIGE: 30,
+    WAREND_MIN: 55,          // soutien requis pour le mérite de la victoire
+    WAREND_PRESTIGE: 250,
+    WAREND_STANDING: 15,
+  },
+
   // ── Phase 5 : la flotte du joueur ────────────────────────────
 
   SHIPS: {

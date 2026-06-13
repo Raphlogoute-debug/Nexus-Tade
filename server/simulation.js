@@ -18,6 +18,7 @@ import { tickFleets } from './factions/fleet.js';
 import { tickContracts } from './factions/contracts.js';
 import { tickClients } from './economy/clients.js';
 import { tickPacts } from './factions/pacts.js';
+import { tickInfluence } from './factions/influence.js';
 import { tickMegaprojects } from './economy/megaprojects.js';
 import { tickColonies, tickLairs } from './economy/frontier.js';
 import { tickTraders } from './npc/traders.js';
@@ -60,6 +61,7 @@ export function runTick(db) {
     tickColonies(db, tick);
     tickLairs(db, tick);
     if (tick % 5 === 0) tickPacts(db, tick);
+    tickInfluence(db);
     tickConcessions(db);
     tickTradingPosts(db, tick);
     tickFleetUpkeep(db);

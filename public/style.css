@@ -752,6 +752,17 @@ tr.tier-row.collapsible:hover td { color: var(--accent); }
 #goal-strip.ready .goal-bar > span { background: var(--green); }
 .goal-num { font-family: var(--mono); color: var(--dim); white-space: nowrap; }
 
+/* Barre de balance d'influence (panneau guerres). */
+.balance-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 4px 0 2px;
+  background: var(--bg);
+}
+.balance-bar > div { height: 100%; }
+
 /* ── Table des ressources ───────────────────────────────────── */
 
 table { width: 100%; border-collapse: collapse; font-size: 12px; }

@@ -12,6 +12,7 @@ import { getCurrentTick } from '../db.js';
 import { getPlayer, getShip, adjustCredits, addPrestige, recordTradeVolume } from '../player/state.js';
 import { warContext } from './war.js';
 import { getStanding, adjustStanding } from './standing.js';
+import { addSupport } from './influence.js';
 
 const C = CONFIG.CONTRACTS;
 const STRATEGIC = Object.keys(CONFIG.FLEET.BUILD);
@@ -146,6 +147,7 @@ export function deliverContract(db, contractId, shipId) {
     // Livrer un belligérant, c'est du revenu de guerre (score du profiteur).
     if (warContext(db).factionWar.has(contract.faction_id)) {
       db.prepare('UPDATE player SET war_profit = ROUND(war_profit + ?, 2) WHERE id = 1').run(paid);
+      addSupport(db, contract.faction_id, (paid / 1000) * CONFIG.INFLUENCE.CONTRACT_PER_1000);
     }
     db.prepare(
       `UPDATE contracts SET remaining = ROUND(remaining - ?, 2),

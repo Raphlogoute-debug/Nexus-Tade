@@ -2827,6 +2827,23 @@ async function renderWarsPanel() {
   for (const war of data.wars) {
     html += `<div class="section-label">⚔ ${war.attacker.name} contre ${war.defender.name}
       — depuis le ${dateShort(war.since)}</div>`;
+
+    // Votre main sur la balance : qui armez-vous le plus ?
+    const sa = war.attacker.support ?? 0;
+    const sd = war.defender.support ?? 0;
+    if (sa + sd >= 10) {
+      const lean = sa > sd * 1.2 ? war.attacker : sd > sa * 1.2 ? war.defender : null;
+      html += `<div class="info-block" style="border-color:var(--accent)">
+        <strong>Votre influence</strong> — ${lean
+          ? `vous penchez la balance vers <span style="color:${lean.color}">${lean.name}</span>`
+          : 'vous armez les deux camps (le profiteur idéal)'}
+        <div class="row" style="margin-top:5px"><span style="color:${war.attacker.color}">${war.attacker.name}</span>
+          <span style="color:${war.defender.color}">${war.defender.name}</span></div>
+        <div class="balance-bar"><div style="width:${Math.round(sa / (sa + sd) * 100)}%;background:${war.attacker.color}"></div><div style="background:${war.defender.color};flex:1"></div></div>
+        <div class="row"><span class="io">${Math.round(sa)} soutien</span><span class="io">${Math.round(sd)} soutien</span></div>
+      </div>`;
+    }
+
     for (const side of [war.attacker, war.defender]) {
       const fleetPct = Math.max(0, Math.min(100, Math.round((side.fleet / (side.fleet0 || 1)) * 100)));
       const standingCls = side.standing > 5 ? 'price-low' : side.standing < -5 ? 'price-high' : '';
@@ -2836,6 +2853,7 @@ async function renderWarsPanel() {
             <span><button class="action-btn mini goto-faction" data-faction="${side.id}">fiche</button></span></div>
           <div class="row"><span>Flotte</span><span>${fmtInt.format(side.fleet)} / ${fmtInt.format(side.fleet0)} (${fleetPct} %) · dispo ${Math.round(side.readiness * 100)} %</span></div>
           <div class="gauge"><div style="width:${fleetPct}%;background:${side.color}"></div></div>
+          ${side.support > 0 ? `<div class="row"><span>Votre soutien</span><span class="price-low">${side.support}</span></div>` : ''}
           <div class="row"><span>Votre réputation</span><span class="${standingCls}">${side.standing > 0 ? '+' : ''}${side.standing}</span></div>
           ${side.openLoans > 0 ? `<div class="row"><span>Vos créances</span><span>${fmtQty(side.openLoans)} cr (×1,3 si victoire)</span></div>` : ''}
           ${side.contracts > 0 ? `<div class="row"><span>Appels d'offres ouverts</span><span class="price-low">${side.contracts}</span></div>` : ''}
@@ -4328,6 +4346,7 @@ async function pollEvents() {
       else if (e.type === 'rival') { toast(e.message, 'warn'); toasted++; }
       else if (e.type === 'peace') { toast(e.message, 'info'); toasted++; }
       else if (e.type === 'client') { toast(e.message, 'good'); toasted++; }
+      else if (e.type === 'profiteer') { toast(e.message, 'good'); playSound('objective'); toasted++; }
       else if (e.type === 'megaproject') { toast(e.message, e.message.includes('ABANDONNÉ') ? 'warn' : 'good'); toasted++; }
       else if (e.type === 'colony') { toast(e.message, 'good'); toasted++; }
       else if (e.type === 'lair') {
