@@ -4276,28 +4276,72 @@ function computeNextGoals() {
 function renderGoalStrip() {
   const el = $('#goal-strip');
   const p = state.player;
+  if (!p) { el.hidden = true; return; }
+  const credits = p.credits ?? 0;
   const goals = computeNextGoals();
-  const credits = p?.credits ?? 0;
-  // Le cap = le moins cher qu'on ne peut pas encore s'offrir.
-  const next = goals.find((x) => x.cost > credits)
-    ?? [...goals].reverse().find((x) => x.cost <= credits); // sinon : le plus gros à portée
-  if (!next) { el.hidden = true; return; }
+  // Le cap d'épargne = le moins cher qu'on ne peut PAS encore s'offrir.
+  const saving = goals.find((x) => x.cost > credits);
+  const st = p.standing;
+
+  let view;
+  if (saving) {
+    // Début/milieu de partie : réunir la somme, c'est ça l'objectif.
+    view = {
+      cap: '▸ Cap suivant', label: saving.label, hint: saving.hint, ready: false,
+      pct: Math.min(100, Math.round((credits / saving.cost) * 100)),
+      num: `${fmtQty(credits)} / ${fmtQty(saving.cost)} cr`,
+      panel: saving.panel ?? '', planet: saving.planetId ?? '', key: saving.k,
+    };
+  } else if (st?.ahead) {
+    // Tout est à portée → le vrai objectif devient le CLASSEMENT : rattraper
+    // la maison juste devant à la valeur nette.
+    const a = st.ahead;
+    view = {
+      cap: `▸ ${st.rank}ᵉ sur ${st.field} au classement`, label: `Dépasser ${a.name}`,
+      hint: 'à la valeur nette', ready: false,
+      pct: Math.min(99, Math.round((st.netWorth / a.netWorth) * 100)),
+      num: `${fmtQty(st.netWorth)} / ${fmtQty(a.netWorth)} cr`,
+      panel: 'house', planet: '', key: 'race',
+    };
+  } else if (st?.rank === 1) {
+    // En tête du Nexus : on défend son avance sur le poursuivant.
+    const c = st.chaser;
+    const close = c ? Math.min(100, Math.round((c.netWorth / st.netWorth) * 100)) : 0;
+    view = {
+      cap: '★ En tête du Nexus', ready: true, pct: close,
+      label: c ? `${c.name} vous talonne` : 'Maison dominante, sans rivale',
+      hint: c ? `à ${close} % de votre valeur nette` : '—',
+      num: c ? `poursuivant : ${fmtQty(c.netWorth)} cr` : `${fmtQty(st.netWorth)} cr`,
+      panel: 'house', planet: '', key: 'lead',
+    };
+  } else {
+    // Repli (rare : pas de classement) — le plus gros achat à portée.
+    const big = [...goals].reverse().find((x) => x.cost <= credits);
+    if (!big) { el.hidden = true; return; }
+    view = {
+      cap: '✓ À votre portée', label: big.label, hint: big.hint, ready: true, pct: 100,
+      num: `${fmtQty(big.cost)} cr`, panel: big.panel ?? '', planet: big.planetId ?? '', key: big.k,
+    };
+  }
+
   el.hidden = false;
-  const pct = Math.min(100, Math.round((credits / next.cost) * 100));
-  const ready = credits >= next.cost;
-  el.classList.toggle('ready', ready);
-  el.innerHTML = `<span class="goal-cap">${ready ? '✓ À votre portée' : '▸ Cap suivant'}</span>
-    <span class="goal-label">${next.label} <span class="goal-hint">· ${next.hint}</span></span>
-    <span class="goal-bar"><span style="width:${pct}%"></span></span>
-    <span class="goal-num">${fmtQty(Math.min(credits, next.cost))} / ${fmtQty(next.cost)} cr</span>`;
-  el.dataset.panel = next.panel ?? '';
-  el.dataset.planet = next.planetId ?? '';
-  // Célébration unique au franchissement.
-  if (ready && goalReachedKey !== next.k) {
-    goalReachedKey = next.k;
-    toast(`Objectif atteint : ${next.label} est à votre portée`, 'good');
+  el.classList.toggle('ready', view.ready);
+  el.classList.toggle('lead', view.key === 'lead');
+  el.innerHTML = `<span class="goal-cap">${view.cap}</span>
+    <span class="goal-label">${view.label} <span class="goal-hint">· ${view.hint}</span></span>
+    <span class="goal-bar"><span style="width:${view.pct}%"></span></span>
+    <span class="goal-num">${view.num}</span>`;
+  el.dataset.panel = view.panel;
+  el.dataset.planet = view.planet;
+
+  // Célébration unique : prise de tête au classement, ou cap d'épargne franchi.
+  const celebrateKey = view.ready ? view.key : null;
+  if (celebrateKey && goalReachedKey !== celebrateKey) {
+    goalReachedKey = celebrateKey;
+    toast(view.key === 'lead' ? 'Vous prenez la tête du Nexus !'
+      : `Objectif atteint : ${view.label} est à votre portée`, 'good');
     playSound('objective');
-  } else if (!ready) {
+  } else if (!celebrateKey) {
     goalReachedKey = null;
   }
 }

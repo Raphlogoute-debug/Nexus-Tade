@@ -21,7 +21,7 @@ import { buyShip, setShipMode, fleetUpkeep, maxFleet } from '../player/shipyard.
 import {
   getHouse, renameHouse, setHouseColor, buildHQ, upgradeHQ,
 } from '../player/house.js';
-import { statsSnapshot } from '../player/stats.js';
+import { statsSnapshot, leaderboard } from '../player/stats.js';
 import { SCENARIOS } from '../../data/scenarios.js';
 import { createRoute, listRoutes, deleteRoute, assignRoute } from '../player/routes.js';
 import {
@@ -478,6 +478,21 @@ export function createApiRouter(db, clock) {
       equipmentCatalog: CONFIG.SHIPS.EQUIPMENT,
       loans: listLoans(db),
       tradePartners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
+      // Classement résumé : votre rang et les maisons qui vous encadrent.
+      // De quoi alimenter la course au classement dans le bandeau d'objectif
+      // (le vrai moteur de fin de partie, quand tout le reste est à portée).
+      standing: (() => {
+        const board = leaderboard(db);
+        const i = board.findIndex((e) => e.isPlayer);
+        const trim = (e) => (e ? { name: e.name, netWorth: e.netWorth, color: e.color } : null);
+        return {
+          rank: board[i].rank,
+          field: board.length,
+          netWorth: board[i].netWorth,
+          ahead: trim(board[i - 1]),  // la maison juste devant (null si 1er)
+          chaser: trim(board[i + 1]), // la maison juste derrière (null si dernier)
+        };
+      })(),
     });
   });
 

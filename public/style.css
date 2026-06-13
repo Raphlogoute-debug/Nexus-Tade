@@ -750,6 +750,10 @@ tr.tier-row.collapsible:hover td { color: var(--accent); }
   transition: width 0.4s ease;
 }
 #goal-strip.ready .goal-bar > span { background: var(--green); }
+/* En tête du classement : le bandeau vire à l'or — vous dominez le Nexus. */
+#goal-strip.lead { border-color: rgba(232, 179, 90, 0.55); background: rgba(232, 179, 90, 0.07); }
+#goal-strip.lead .goal-cap { color: var(--amber); }
+#goal-strip.lead .goal-bar > span { background: linear-gradient(90deg, #b8862f, var(--amber)); }
 .goal-num { font-family: var(--mono); color: var(--dim); white-space: nowrap; }
 
 /* Barre de balance d'influence (panneau guerres). */
