@@ -782,6 +782,23 @@ tr.tier-row td {
 tr.res-row { cursor: pointer; }
 tr.res-row:hover td { background: #161d2b; }
 tr.res-row.selected td { background: #1a2334; }
+tr.res-row.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* Identité visuelle des ressources : glyphe coloré par famille. La police
+   sans-serif accueille mieux les noms longs (« Composants électroniques »). */
+.res-name { font-family: var(--ui); white-space: normal; line-height: 1.25; }
+.rc-glyph {
+  display: inline-block;
+  width: 1.05em;
+  margin-right: 5px;
+  text-align: center;
+  font-size: 11px;
+  filter: drop-shadow(0 0 5px currentColor);
+}
+
+/* Légende des familles (comparateur de marchés). */
+.cat-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 2px 0 10px; }
+.cat-legend span { color: var(--dim); font-size: 11px; white-space: nowrap; }
 
 .gauge {
   height: 6px;

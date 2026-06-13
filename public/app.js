@@ -22,6 +22,38 @@ const BIOME_COLORS = {
 const STAR_COLORS = ['#fff4d6', '#cfe5ff', '#ffd9a0', '#ffc4b0', '#e8f0ff'];
 const TIER_LABELS = { raw: 'Brut', intermediate: 'Intermédiaire', finished: 'Fini' };
 
+// ── Identité visuelle des ressources ─────────────────────────────
+// Index id → { name, tier, cat… } et catégories (couleur + glyphe),
+// remplis depuis /api/universe. Une « puce » colorée par famille rend
+// les 37 ressources lisibles d'un coup d'œil partout dans l'UI.
+const resById = new Map();
+let resCats = {};
+const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function indexResources(universe) {
+  resById.clear();
+  for (const r of universe.resources ?? []) resById.set(r.id, r);
+  resCats = universe.categories ?? {};
+}
+
+function resName(id) {
+  return resById.get(id)?.name ?? id;
+}
+
+// Glyphe coloré de la famille (seul, pour les en-têtes compacts).
+function resGlyph(id) {
+  const cat = resCats[resById.get(id)?.cat];
+  if (!cat) return '';
+  return `<span class="rc-glyph" style="color:${cat.color}" title="${cat.label}">${cat.glyph}</span>`;
+}
+
+// Puce complète : glyphe de famille + nom. C'est ce qu'on met partout
+// où une ressource est nommée.
+function resChip(id, name) {
+  return `${resGlyph(id)}${escapeHtml(name ?? resName(id))}`;
+}
+
 const fmtNum = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
 const fmtInt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 const fmtPrice = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1341,7 +1373,7 @@ function renderDockedPanel(planet, market) {
     for (const n of mp.needs) {
       const held = (selectedShip()?.cargo ?? []).find((l) => l.resource_id === n.resource_id)?.quantity ?? 0;
       const full = n.delivered >= n.required;
-      html += `<div class="row"><span>${n.resourceName} ${full ? '✓' : ''}</span>
+      html += `<div class="row"><span>${resChip(n.resource_id, n.resourceName)} ${full ? '✓' : ''}</span>
         <span>${fmtQty(n.delivered)}/${fmtQty(n.required)} ·
           <span class="price-low">${fmtPrice.format(n.unit_price)} cr/u</span>
           ${shipHere && !full && held > 0
@@ -1358,7 +1390,7 @@ function renderDockedPanel(planet, market) {
     const pct = Math.round((c.used / c.cap) * 100);
     const qCls = c.quality >= 1.3 ? 'price-low' : c.quality < 0.8 ? 'price-high' : '';
     html += `
-      <div class="section-label">Concession — ${c.resourceName} (niv. ${c.level})</div>
+      <div class="section-label">Concession — ${resChip(c.resource_id, c.resourceName)} (niv. ${c.level})</div>
       <div class="info-block">
         <div class="row"><span>Gisement</span>
           <span class="${qCls}">${c.qualityLabel} ×${fmtNum.format(c.quality)}</span></div>
@@ -1367,7 +1399,7 @@ function renderDockedPanel(planet, market) {
         <div class="gauge"><div style="width:${pct}%"></div></div>
     `;
     for (const s of c.storage) {
-      html += `<div class="row"><span>${s.name}</span>
+      html += `<div class="row"><span>${resChip(s.resource_id, s.name)}</span>
         <span>${fmtQty(s.quantity)}
         ${shipHere ? `<button class="action-btn collect-btn" data-res="${s.resource_id}">→ soute</button>` : ''}
         </span></div>`;
@@ -1380,7 +1412,7 @@ function renderDockedPanel(planet, market) {
     if (shipHere && shipCargo.length > 0) {
       html += `<div class="row" style="margin-top:6px"><span>Déposer</span><span>
         <select id="deposit-res">${shipCargo.map((x) =>
-          `<option value="${x.resource_id}">${x.name} (${fmtQty(x.quantity)})</option>`).join('')}</select>
+          `<option value="${x.resource_id}">${(resCats[resById.get(x.resource_id)?.cat]?.glyph ?? '')} ${x.name} (${fmtQty(x.quantity)})</option>`).join('')}</select>
         <button class="action-btn" id="btn-deposit">→ entrepôt</button></span></div>`;
     }
     html += `
@@ -1450,7 +1482,7 @@ function renderDockedPanel(planet, market) {
         <div class="gauge"><div style="width:${pct}%"></div></div>
     `;
     for (const s of post.storage) {
-      html += `<div class="row"><span>${s.name}
+      html += `<div class="row"><span>${resChip(s.resource_id, s.name)}
         <span style="color:var(--dim)">(coût moy. ${fmtPrice.format(s.avg_cost)})</span></span>
         <span>${fmtQty(s.quantity)}
         ${shipHere ? `<button class="action-btn post-withdraw" data-res="${s.resource_id}">→ soute</button>` : ''}
@@ -1460,7 +1492,7 @@ function renderDockedPanel(planet, market) {
     if (shipHere && postCargo.length > 0) {
       html += `<div class="row" style="margin-top:6px"><span>Déposer</span><span>
         <select id="post-deposit-res">${postCargo.map((x) =>
-          `<option value="${x.resource_id}">${x.name} (${fmtQty(x.quantity)})</option>`).join('')}</select>
+          `<option value="${x.resource_id}">${(resCats[resById.get(x.resource_id)?.cat]?.glyph ?? '')} ${x.name} (${fmtQty(x.quantity)})</option>`).join('')}</select>
         <button class="action-btn" id="btn-post-deposit">→ comptoir</button></span></div>`;
     }
     html += `
@@ -1582,7 +1614,7 @@ function renderDockedPanel(planet, market) {
       const sel = state.tradeSel === r.resource_id ? 'selected' : '';
       html += `
         <tr class="res-row ${sel}" data-res="${r.resource_id}">
-          <td>${r.name}</td>
+          <td class="res-name">${resChip(r.resource_id, r.name)}</td>
           <td>${fmtQty(r.stock)}</td>
           <td>${held > 0 ? fmtQty(held) : '·'}</td>
           <td class="${priceCls}" title="base : ${fmtPrice.format(r.basePrice)}">
@@ -1883,7 +1915,7 @@ async function fillBestOutlet(planet, market) {
   const isMyConcession = state.player.concessions.some((x) => x.planet_id === planet.id);
   slot.innerHTML = `
     <div class="info-block outlet">
-      💡 Meilleur débouché connu pour vos ${fmtQty(cargo.quantity)} ${cargo.name} :
+      💡 Meilleur débouché connu pour vos ${fmtQty(cargo.quantity)} ${resChip(cargo.resource_id, cargo.name)} :
       <span class="goto-link" id="outlet-link">${best.planetName}</span>
       — ${fmtPrice.format(best.price)} cr (ici ${fmtPrice.format(localPrice)})
       ≈ <span class="price-low">+${fmtQty(gain)} cr</span>
@@ -1926,7 +1958,7 @@ function missionSectionHtml(planet, c) {
     html += `
       <div class="row"><span>Vendre</span><span>
         <select id="mission-res">${c.storage.map((s) =>
-          `<option value="${s.resource_id}" data-qty="${Math.floor(s.quantity)}">${s.name} (${fmtQty(s.quantity)})</option>`).join('')}</select>
+          `<option value="${s.resource_id}" data-qty="${Math.floor(s.quantity)}">${(resCats[resById.get(s.resource_id)?.cat]?.glyph ?? '')} ${s.name} (${fmtQty(s.quantity)})</option>`).join('')}</select>
         <input type="number" id="mission-qty" min="1" value="${Math.max(1, Math.floor(first.quantity))}" style="width:80px;${inputStyle}">
       </span></div>
       <div class="row" style="margin-top:5px"><span>à</span><span>
@@ -1944,7 +1976,7 @@ function missionSectionHtml(planet, c) {
   }
   for (const m of missions) {
     html += `<div class="row" style="margin-top:6px">
-      <span>🚀 ${m.ship_name} · ${m.resourceName} → ${m.to_name}${m.recurring ? ' ♻' : ''}</span>
+      <span>🚀 ${m.ship_name} · ${resChip(m.resource_id, m.resourceName)} → ${m.to_name}${m.recurring ? ' ♻' : ''}</span>
       <span>reste ${fmtQty(m.quantity)}${m.carrying > 0 ? ` <span style="color:var(--dim)">(soute ${fmtQty(m.carrying)})</span>` : ''}
       <button class="action-btn mini cancel-mission" data-id="${m.id}" title="Annuler la mission (le vaisseau garde sa cargaison)">✕</button></span></div>`;
   }
@@ -2026,7 +2058,7 @@ function clientsSectionHtml(planet) {
   for (const sc of clients) {
     if (sc.status === 'open') {
       html += `<div class="info-block">
-        <div class="row"><span>📦 Demande : ${fmtQty(sc.quantity)} ${sc.resourceName}</span>
+        <div class="row"><span>📦 Demande : ${fmtQty(sc.quantity)} ${resChip(sc.resource_id, sc.resourceName)}</span>
           <span class="price-low">${fmtPrice.format(sc.unit_price)} cr/u fixé</span></div>
         <div class="row"><span style="color:var(--dim)">offre valable jusqu'au ${dateOf(sc.expires_tick)}${
           sc.loyalty > 0 ? ` · client fidèle (niv. ${sc.loyalty})` : ''}</span>
@@ -2039,7 +2071,7 @@ function clientsSectionHtml(planet) {
       const here = ship?.planet_id === planet.id;
       const held = (ship?.cargo ?? []).find((l) => l.resource_id === sc.resource_id)?.quantity ?? 0;
       html += `<div class="info-block" style="border-left:3px solid var(--green)">
-        <div class="row"><span>📦 Contrat signé : ${sc.resourceName}</span>
+        <div class="row"><span>📦 Contrat signé : ${resChip(sc.resource_id, sc.resourceName)}</span>
           <span>${fmtQty(sc.remaining)}/${fmtQty(sc.quantity)} restants</span></div>
         <div class="row"><span style="color:var(--dim)">à ${fmtPrice.format(sc.unit_price)} cr/u ·
           avant le ${dateOf(sc.expires_tick)}</span>
@@ -2244,7 +2276,7 @@ async function renderRemotePanel(planet, market) {
         const priceCls = ratio >= 1.25 ? 'price-high' : ratio <= 0.8 ? 'price-low' : '';
         html += `
           <tr>
-            <td>${r.name}</td>
+            <td class="res-name">${resChip(r.resource_id, r.name)}</td>
             <td>${r.stock === null ? '?' : fmtQty(r.stock)}</td>
             <td class="${priceCls}" title="base : ${fmtPrice.format(r.basePrice)}">${fmtPrice.format(r.price)}</td>
           </tr>
@@ -2341,16 +2373,19 @@ async function renderMarketsPanel() {
   const distOf = (m) => origin ? Math.round(Math.hypot(m.x - origin.x, m.y - origin.y)) : null;
 
   const resources = state.universe.resources;
+  const optGlyph = (r) => `${resCats[r.cat]?.glyph ?? ''} `;
   let html = `
     <button class="back-link" id="back-to-system">← retour</button>
-    <h2 class="panel-title">Marchés — ${scan.name}</h2>
+    <h2 class="panel-title">Marchés — ${resChip(scan.resourceId, scan.name)}</h2>
     <p class="panel-sub">Comparateur d'arbitrage sur vos marchés connus
       (prix de base ${fmtPrice.format(scan.basePrice)} cr).</p>
+    <div class="cat-legend">${Object.values(resCats).map((c) =>
+      `<span><span class="rc-glyph" style="color:${c.color}">${c.glyph}</span>${c.label}</span>`).join('')}</div>
     <div style="margin-bottom:8px">
       <select id="market-res">
         ${['raw', 'intermediate', 'finished'].map((t) => `<optgroup label="${TIER_LABELS[t]}">${
           resources.filter((r) => r.tier === t)
-            .map((r) => `<option value="${r.id}" ${r.id === state.marketSel ? 'selected' : ''}>${r.name}</option>`).join('')
+            .map((r) => `<option value="${r.id}" ${r.id === state.marketSel ? 'selected' : ''}>${optGlyph(r)}${r.name}</option>`).join('')
         }</optgroup>`).join('')}
       </select>
       <button class="action-btn" id="market-heat">${
@@ -2619,7 +2654,7 @@ async function renderFleetPanel() {
     html += `<div class="industry io">Aucune — lancez-en depuis vos concessions (« Vendre la production »)</div>`;
   }
   for (const m of missions) {
-    html += `<div class="industry">🚀 ${m.ship_name} : ${m.resourceName} → ${m.to_name}
+    html += `<div class="industry">🚀 ${m.ship_name} : ${resChip(m.resource_id, m.resourceName)} → ${m.to_name}
       <span class="io">— reste ${fmtQty(m.quantity)}${m.carrying > 0 ? `, soute ${fmtQty(m.carrying)}` : ''}</span>
       <button class="action-btn mini cancel-mission" data-id="${m.id}">✕</button></div>`;
   }
@@ -2646,7 +2681,7 @@ async function renderFleetPanel() {
   for (const sc of clients) {
     html += `<div class="industry">📦 <span class="goto-link" data-planet="${sc.planet_id}"
         data-system="${sc.systemId}">${sc.planetName}</span> :
-      ${fmtQty(sc.remaining)}/${fmtQty(sc.quantity)} ${sc.resourceName}
+      ${fmtQty(sc.remaining)}/${fmtQty(sc.quantity)} ${resChip(sc.resource_id, sc.resourceName)}
       <span class="io">— ${fmtPrice.format(sc.unit_price)} cr/u fixé · avant le ${dateShort(sc.expires_tick)}${
         sc.loyalty > 0 ? ` · fidélité ${sc.loyalty}` : ''}</span></div>`;
   }
@@ -2764,7 +2799,7 @@ async function renderObservatoryPanel() {
       <div class="gauge"><div style="width:${pct}%;background:${mp.faction_color}"></div></div>
       <div class="row"><span>Livraison : <span class="goto-link" data-planet="${mp.capital_planet_id}"
         data-system="${mp.capital_system_id}">${mp.capital_name}</span></span><span></span></div>
-      ${mp.needs.map((n) => `<div class="row"><span>${n.resourceName}</span>
+      ${mp.needs.map((n) => `<div class="row"><span>${resChip(n.resource_id, n.resourceName)}</span>
         <span>${fmtQty(n.delivered)}/${fmtQty(n.required)}
         <span class="price-low">à ${fmtPrice.format(n.unit_price)} cr</span></span></div>`).join('')}
     </div>`;
@@ -3512,7 +3547,7 @@ async function renderFactionPanel(factionId) {
       const here = selectedShip()?.planet_id === c.deliver_planet_id;
       html += `
         <div class="info-block">
-          <div class="row"><span>${c.resourceName}</span>
+          <div class="row"><span>${resChip(c.resource_id, c.resourceName)}</span>
             <span>${fmtQty(c.remaining)} / ${fmtQty(c.quantity)} restants</span></div>
           <div class="row"><span>Prix contractuel</span>
             <span class="price-low">${fmtPrice.format(c.unit_price)} cr/u</span></div>
@@ -3732,6 +3767,7 @@ async function pollEvents() {
   if (territoryChanged) {
     const universe = await api('/universe');
     state.universe = universe;
+    indexResources(universe);
     state.planetIndex.clear();
     state.capitalSystems.clear();
     for (const sys of universe.systems) {
@@ -3818,6 +3854,7 @@ async function poll() {
 async function init() {
   const [universe, s] = await Promise.all([api('/universe'), api('/state')]);
   state.universe = universe;
+  indexResources(universe);
   state.tick = s.tick;
   state.speed = s.speed;
   state.wars = s.wars ?? [];

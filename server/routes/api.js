@@ -12,7 +12,7 @@ import { generateUniverse } from '../universe/generator.js';
 import { randomSeed } from '../universe/rng.js';
 import { planetSnapshot } from '../economy/engine.js';
 import { RECIPES, recipeOutput, recipeName } from '../../data/recipes.js';
-import { RESOURCES, RESOURCE_IDS } from '../../data/resources.js';
+import { RESOURCES, RESOURCE_IDS, CATEGORIES } from '../../data/resources.js';
 import { BIOMES } from '../../data/biomes.js';
 import {
   initPlayer, getPlayer, getShip, getFleet, getCargo, cargoUsed, tierOf, hasTierAccess,
@@ -120,8 +120,10 @@ export function createApiRouter(db, clock) {
       systems: [...bySystem.values()],
       factions,
       resources: RESOURCE_IDS.map((id) => ({
-        id, name: RESOURCES[id].name, tier: RESOURCES[id].tier, basePrice: RESOURCES[id].basePrice,
+        id, name: RESOURCES[id].name, tier: RESOURCES[id].tier,
+        basePrice: RESOURCES[id].basePrice, cat: RESOURCES[id].cat,
       })),
+      categories: CATEGORIES,
     });
   });
 
