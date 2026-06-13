@@ -825,9 +825,13 @@ function drawSystems(t) {
 // — Planètes en orbite (au zoom) ——————————————————————————————
 // En zoomant, chaque système prend vie : ses planètes tournent autour de
 // l'étoile, anneaux d'orbite et couleurs de biome. Donne une raison de
-// zoomer et un ancrage spatial (la planète sélectionnée est mise en avant).
+// zoomer et un ancrage spatial (la planète sélectionnée est mise en
+// avant). Les positions dessinées sont mises en cache pour rendre les
+// planètes directement cliquables/survolables sur la carte.
+let planetHits = [];
 function drawPlanetOrbits(t) {
   const v = state.view;
+  planetHits = [];
   if (v.zoom < 2.2 || state.heatmap || state.geoMap) return;
   const fade = Math.min(1, (v.zoom - 2.2) / 1.2); // apparition progressive
   const zr = Math.pow(v.zoom, 0.6);
@@ -842,6 +846,8 @@ function drawPlanetOrbits(t) {
       const px = sx + Math.cos(ang) * orbit;
       const py = sy + Math.sin(ang) * orbit * 0.62; // ellipse vue de biais
       const isSel = state.selectedPlanet === p.id;
+      const pr = (isSel ? 3.6 : 2.4) * Math.min(2.4, zr);
+      planetHits.push({ planetId: p.id, systemId: sys.id, x: px, y: py, r: pr + 4 });
 
       // Anneau d'orbite, très discret.
       ctx.globalAlpha = fade * (isSel ? 0.35 : 0.13);
@@ -852,7 +858,6 @@ function drawPlanetOrbits(t) {
       ctx.stroke();
 
       // La planète : pastille de biome avec petit halo.
-      const pr = (isSel ? 3.6 : 2.4) * Math.min(2.4, zr);
       const col = BIOME_COLORS[p.biome] ?? '#9ab1c6';
       ctx.globalAlpha = fade;
       const grad = ctx.createRadialGradient(px, py, 0, px, py, pr * 2.2);
@@ -1035,6 +1040,48 @@ function drawFleet(t) {
   }
 }
 
+// — Boussole : flèche vers le vaisseau piloté quand il est hors-champ —
+// On clique « ◎ » pour le recentrer ; la flèche cliquable fait pareil.
+let compassHit = null;
+function drawCompass(t) {
+  compassHit = null;
+  const pos = shipMapPosition(selectedShip());
+  if (!pos) return;
+  const v = state.view;
+  const [sx, sy] = toScreen(pos.x, pos.y);
+  const margin = 26;
+  if (sx >= margin && sy >= margin && sx <= v.w - margin && sy <= v.h - margin) return;
+
+  // Point d'ancrage : intersection du bord avec la direction du vaisseau.
+  const cx = v.w / 2;
+  const cy = v.h / 2;
+  const ang = Math.atan2(sy - cy, sx - cx);
+  const ex = Math.max(margin, Math.min(v.w - margin, sx));
+  const ey = Math.max(margin, Math.min(v.h - margin, sy));
+  compassHit = { x: ex, y: ey, r: 20 };
+
+  const pulse = 0.7 + 0.3 * Math.sin(t * 3);
+  ctx.save();
+  ctx.translate(ex, ey);
+  // Pastille + flèche cyan vers le vaisseau.
+  ctx.fillStyle = `rgba(13,17,25,0.85)`;
+  ctx.strokeStyle = `rgba(92,205,245,${0.5 + 0.4 * pulse})`;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.rotate(ang);
+  ctx.fillStyle = '#5ccdf5';
+  ctx.beginPath();
+  ctx.moveTo(9, 0);
+  ctx.lineTo(1, 5);
+  ctx.lineTo(1, -5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 // — Image complète ————————————————————————————————————————————
 
 function drawMap(t = performance.now() / 1000) {
@@ -1049,6 +1096,7 @@ function drawMap(t = performance.now() / 1000) {
   drawPlayerAssets();
   drawFleet(t);
   drawFloaters();
+  drawCompass(t);
 }
 
 let renderLoopStarted = false;
@@ -1117,6 +1165,18 @@ function systemAt(mx, my) {
   return best;
 }
 
+// Une planète en orbite sous le curseur (au zoom) — d'après le cache des
+// positions dessinées au dernier rendu.
+function planetAt(mx, my) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const h of planetHits) {
+    const d = Math.hypot(mx - h.x, my - h.y);
+    if (d <= h.r + 4 && d < bestDist) { bestDist = d; best = h; }
+  }
+  return best;
+}
+
 // — Caméra : glisser pour déplacer, molette pour zoomer, clic = choisir —
 
 let drag = null; // { x, y, cx, cy, moved }
@@ -1150,7 +1210,22 @@ window.addEventListener('mouseup', (e) => {
   canvas.style.cursor = 'grab';
   if (!wasDrag && e.target === canvas) {
     const rect = canvas.getBoundingClientRect();
-    const sys = systemAt(e.clientX - rect.left, e.clientY - rect.top);
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    // La boussole hors-champ : un clic recentre sur le vaisseau.
+    if (compassHit && Math.hypot(mx - compassHit.x, my - compassHit.y) <= compassHit.r) {
+      centerOnShip();
+      return;
+    }
+    // Une planète en orbite a la priorité (on est zoomé sur le système).
+    const hit = planetAt(mx, my);
+    if (hit) {
+      const entry = state.planetIndex.get(hit.planetId);
+      selectSystem(entry.system);
+      selectPlanet(hit.planetId);
+      return;
+    }
+    const sys = systemAt(mx, my);
     if (sys) selectSystem(sys);
   }
 });
@@ -1173,7 +1248,27 @@ canvas.addEventListener('wheel', (e) => {
 canvas.addEventListener('mousemove', (e) => {
   if (drag?.moved) return;
   const rect = canvas.getBoundingClientRect();
-  const sys = systemAt(e.clientX - rect.left, e.clientY - rect.top);
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // Une planète en orbite sous le curseur : étiquette dédiée (biome,
+  // population, tier), priorité sur l'étoile.
+  const hit = planetAt(mx, my);
+  if (hit) {
+    const entry = state.planetIndex.get(hit.planetId);
+    const p = entry.planet;
+    state.hoverSystem = null;
+    canvas.style.cursor = 'pointer';
+    tooltip.hidden = false;
+    tooltip.innerHTML = `<span class="biome-dot" style="display:inline-block;background:${BIOME_COLORS[p.biome]}"></span> `
+      + `<strong>${p.name}</strong> ${tierBadge(p.tier)}<br>`
+      + `${p.biomeLabel} · ${formatPop(p.population)}`;
+    tooltip.style.left = `${mx + 14}px`;
+    tooltip.style.top = `${my - 8}px`;
+    return;
+  }
+
+  const sys = systemAt(mx, my);
   state.hoverSystem = sys;
   canvas.style.cursor = sys ? 'pointer' : 'grab';
   if (sys) {
@@ -1218,7 +1313,7 @@ $('#zoom-fit').addEventListener('click', () => {
   v.cx = state.universe.mapSize / 2;
   v.cy = state.universe.mapSize / 2;
 });
-$('#zoom-ship').addEventListener('click', () => {
+function centerOnShip() {
   const pos = shipMapPosition(selectedShip());
   if (!pos) return;
   const v = state.view;
@@ -1226,7 +1321,8 @@ $('#zoom-ship').addEventListener('click', () => {
   v.cy = pos.y;
   if (v.zoom < 2.2) v.zoom = 2.2;
   clampView();
-});
+}
+$('#zoom-ship').addEventListener('click', centerOnShip);
 $('#traffic-toggle').addEventListener('click', (e) => {
   state.showTraffic = !state.showTraffic;
   e.currentTarget.classList.toggle('off', !state.showTraffic);
