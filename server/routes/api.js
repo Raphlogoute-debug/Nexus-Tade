@@ -41,7 +41,7 @@ import {
 } from '../player/posts.js';
 import { listObjectives } from '../player/objectives.js';
 import { createMission, cancelMission, listMissions } from '../player/missions.js';
-import { equipShip, shipEquipment } from '../player/shipyard.js';
+import { equipShip, shipEquipment, sellShip } from '../player/shipyard.js';
 import { depositQuality, depositLabel } from '../player/concession.js';
 import {
   listSupplyContracts, contractsAt, acceptSupplyContract, deliverSupplyContract,
@@ -743,6 +743,12 @@ export function createApiRouter(db, clock) {
       return res.status(400).json({ error: 'paramètres invalides' });
     }
     answer(res, equipShip(db, id, moduleId));
+  });
+
+  router.post('/ships/:id/sell', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id invalide' });
+    answer(res, sellShip(db, id));
   });
 
   // ── Clients réguliers (contrats d'approvisionnement) ────────────

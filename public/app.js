@@ -334,12 +334,38 @@ function drawFloaters() {
 
 // ── Journal ──────────────────────────────────────────────────────
 
-function log(message) {
+// Catégorie d'une entrée pour le filtrage du journal.
+const EVENT_CAT = {
+  war: 'guerre', peace: 'guerre', conquest: 'guerre', profiteer: 'guerre',
+  seizure: 'guerre', intel: 'guerre', smuggle: 'guerre', loan: 'guerre',
+  mission: 'eco', client: 'eco', objective: 'eco', victory: 'eco', rival: 'eco',
+  colony: 'monde', lair: 'monde', megaproject: 'monde', pact: 'monde',
+  fleet: 'monde', arrival: 'monde',
+};
+let journalFilter = 'tout';
+
+function log(message, cat = 'vous') {
   const li = document.createElement('li');
+  li.dataset.cat = cat;
+  li.hidden = journalFilter !== 'tout' && journalFilter !== cat;
   li.innerHTML = `<span class="tick-stamp">${dateShort(state.tick)}</span><strong>${message}</strong>`;
   const list = $('#journal-list');
   list.prepend(li);
-  while (list.children.length > 60) list.lastChild.remove();
+  while (list.children.length > 80) list.lastChild.remove();
+}
+
+function setJournalFilter(f) {
+  journalFilter = f;
+  for (const li of $('#journal-list').children) {
+    li.hidden = f !== 'tout' && li.dataset.cat !== f;
+  }
+  for (const b of document.querySelectorAll('.journal-filter')) {
+    b.classList.toggle('active', b.dataset.f === f);
+  }
+}
+
+for (const b of document.querySelectorAll('.journal-filter')) {
+  b.addEventListener('click', () => setJournalFilter(b.dataset.f));
 }
 
 // Journal repliable : un clic sur l'étiquette le réduit à une ligne.
@@ -2966,6 +2992,10 @@ async function renderFleetPanel() {
             title="${mod.label} — installation aux chantiers civils (T2+), vaisseau à quai"
             ${p.credits < mod.price ? 'disabled' : ''}>+ ${mod.desc} (${fmtQty(mod.price)} cr)</button> `;
     }
+    if (ships.length > 1 && ship.planet_id !== null) {
+      html += ` <button class="action-btn mini sell-ship" data-ship="${ship.id}" data-name="${ship.name.replace(/"/g, '&quot;')}"
+        title="Revendre ce vaisseau au chantier (remboursement partiel)">revendre</button>`;
+    }
     html += `</div></div>`;
   }
 
@@ -3045,12 +3075,38 @@ async function renderFleetPanel() {
       renderFleetPanel();
     });
   }
+  for (const btn of panel.querySelectorAll('.sell-ship')) {
+    btn.addEventListener('click', () => confirmAction(btn,
+      `Revendre ${btn.dataset.name} ?`, async () => {
+        const r = await apiPost(`/ships/${btn.dataset.ship}/sell`);
+        if (r.ok) { toast(`${r.name} revendu (+${fmtQty(r.refund)} cr)`, 'good'); log(`${r.name} revendu au chantier (+${fmtQty(r.refund)} cr)`); }
+        else log(`Revente impossible : ${r.error}`);
+        await refreshPlayerAndKnowledge();
+        renderFleetPanel();
+      }));
+  }
   for (const link of panel.querySelectorAll('.goto-link')) {
     link.addEventListener('click', () => {
       const sys = state.universe.systems.find((s) => s.id === Number(link.dataset.system));
       if (sys) { selectSystem(sys); selectPlanet(Number(link.dataset.planet)); }
     });
   }
+}
+
+// Confirmation inline : un bouton se transforme en « Confirmer ? » pendant
+// 3 s avant d'exécuter l'action destructrice (pas de popup natif moche).
+function confirmAction(btn, label, action) {
+  if (btn.dataset.confirming === '1') return;
+  btn.dataset.confirming = '1';
+  const original = btn.textContent;
+  const originalTitle = btn.title;
+  btn.textContent = '⚠ confirmer ?';
+  if (label) btn.title = label;
+  btn.classList.add('confirming');
+  const reset = () => { btn.textContent = original; btn.title = originalTitle; btn.classList.remove('confirming'); btn.dataset.confirming = '0'; clearTimeout(timer); btn.removeEventListener('click', onConfirm); };
+  const onConfirm = (e) => { e.stopPropagation(); reset(); action(); };
+  const timer = setTimeout(reset, 3000);
+  setTimeout(() => btn.addEventListener('click', onConfirm, { once: true }), 0);
 }
 
 $('#btn-fleet').addEventListener('click', renderFleetPanel);
@@ -4333,7 +4389,7 @@ async function pollEvents() {
   let toasted = 0;
   for (const e of events) {
     state.lastEventId = Math.max(state.lastEventId, e.id);
-    log(e.message);
+    log(e.message, EVENT_CAT[e.type] ?? 'monde');
     if (e.type === 'victory') showVictory(e.message);
     if (['war', 'peace', 'conquest'].includes(e.type)) territoryChanged = true;
 

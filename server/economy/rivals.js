@@ -63,10 +63,19 @@ const upsertHolding = `
   INSERT INTO rival_holdings (rival_id, resource_id, quantity, avg_cost) VALUES (?, ?, ?, ?)
   ON CONFLICT(rival_id, resource_id) DO UPDATE SET quantity = ROUND(quantity + excluded.quantity, 2)`;
 
+// Le volume d'une maison croît avec sa richesse : une grande maison
+// brasse bien plus qu'un débutant. C'est ce qui leur permet de COMPOUNDER
+// et de rester des concurrents crédibles jusqu'en fin de partie (sinon
+// elles plafonnent et le classement devient joué d'avance).
+function rivalScale(rival) {
+  return Math.min(R.MAX_SCALE, 1 + rival.credits / R.SCALE_PER_CREDIT);
+}
+
 // Un coup d'arbitrage : deux planètes tirées au sort, on cherche une
 // ressource bien moins chère ici que là, on l'y achète et la revend là —
 // les deux marchés bougent, la marge rentre.
 function tryArbitrage(db, rival, planetIds) {
+  const cap = R.DEAL_CAPACITY * rivalScale(rival);
   for (let attempt = 0; attempt < 4; attempt++) {
     const a = planetIds[Math.floor(Math.random() * planetIds.length)];
     const b = planetIds[Math.floor(Math.random() * planetIds.length)];
@@ -79,7 +88,7 @@ function tryArbitrage(db, rival, planetIds) {
     if ((there.price - here.price) / here.price < R.MARGIN) continue;
 
     const qty = Math.floor(Math.min(
-      R.DEAL_CAPACITY, here.stock * 0.25, rival.credits / (here.price * 1.1)));
+      cap, here.stock * 0.3, rival.credits / (here.price * 1.1)));
     if (qty < 5) continue;
 
     const buy = applyMarketTrade(db, a, rid, qty, 'buy', here);
@@ -98,7 +107,7 @@ function tryArbitrage(db, rival, planetIds) {
 function tickCorner(db, rival, tick) {
   if (rival.cornering_until > tick) {
     const m = marketContext(db, rival.cornering_planet_id, rival.cornering_resource);
-    const qty = Math.floor(Math.min(R.CORNER_FLOW, m.stock, rival.credits / (m.price * 1.1)));
+    const qty = Math.floor(Math.min(R.CORNER_FLOW * rivalScale(rival), m.stock, rival.credits / (m.price * 1.1)));
     if (qty >= 1) {
       const buy = applyMarketTrade(db, rival.cornering_planet_id, rival.cornering_resource, qty, 'buy', m);
       db.prepare('UPDATE rivals SET credits = ROUND(credits - ?, 2) WHERE id = ?').run(buy.total, rival.id);
@@ -211,6 +220,11 @@ export function tickRivals(db, tick) {
   ).all(R.SCAN_PLANETS).map((p) => p.id);
   if (sample.length < 2) return;
 
+  // Le plafond du revenu d'entreprise se recale sur la valeur nette du
+  // joueur : une cible mouvante qui rend les rivaux toujours pertinents,
+  // quelle que soit la vitesse à laquelle vous jouez.
+  const ceiling = Math.max(R.START_CREDITS, playerNetWorthLite(db) * R.ENTERPRISE_CEILING_MULT);
+
   db.transaction(() => {
     for (const rival of rivals) {
       if (rival.cornering_resource || rival.cornering_until) {
@@ -221,6 +235,18 @@ export function tickRivals(db, tick) {
       tryArbitrage(db, rival, sample);
       maybeStartCorner(db, rival, tick, sample);
       maybeClaimDeposit(db, rival, tick);
+      // Revenu d'entreprise : retour composé sur la valeur nette, mais le
+      // rendement s'éteint à mesure qu'on approche du plafond (logistique).
+      // Négligeable au début — l'arbitrage domine — décisif en milieu de
+      // partie, nul une fois la maison au niveau du joueur.
+      if (rival.net_worth > 0 && rival.net_worth < ceiling) {
+        const slack = 1 - rival.net_worth / ceiling; // 1 = loin derrière, 0 = au niveau
+        const income = Math.round(rival.net_worth * R.ENTERPRISE_RETURN * slack * 100) / 100;
+        if (income > 0) {
+          db.prepare('UPDATE rivals SET credits = ROUND(credits + ?, 2) WHERE id = ?')
+            .run(income, rival.id);
+        }
+      }
     }
 
     // Valeur nette : recalcul à chaque tick (peu de rivaux), historisée

@@ -313,6 +313,25 @@ export const CONFIG = {
     CORNER_MIN_CREDITS: 120000, // il faut les reins solides pour accaparer
     HISTORY_EVERY: 10,       // échantillonnage de la valeur nette (ticks)
     HISTORY_KEEP: 120,       // points conservés par sujet
+    // Mise à l'échelle avec la richesse : les volumes brassés croissent
+    // avec le capital, pour que les maisons compoundent et restent des
+    // rivales credibles en fin de partie (sinon le classement est joué).
+    SCALE_PER_CREDIT: 120000, // +1× de volume par 120 k cr de capital
+    MAX_SCALE: 60,            // plafond (une maison à ~7 M cr brasse ×60)
+    // Revenu d'entreprise : une maison fait fructifier son capital — retour
+    // composé sur sa valeur nette, à chaque délibération. C'est le moteur
+    // qui les fait grossir dans la durée et rester au coude-à-coude au
+    // classement. Sans lui, l'arbitrage plafonne et la course est jouée
+    // d'avance (le joueur, lui, compound en jouant activement).
+    //
+    // Le rendement DÉCROÎT à mesure que la maison rattrape le joueur
+    // (croissance logistique) : elles grossissent vite tant qu'elles sont
+    // loin derrière, puis se tassent autour de VOTRE niveau. Le plafond se
+    // recale sur votre valeur nette — accélérez, elles ont de l'air pour
+    // vous courir après ; levez le pied, elles vous rattrapent. Jamais un
+    // emballement, jamais un plafond ridicule : une vraie course.
+    ENTERPRISE_RETURN: 0.006,      // par délibération (≈ tous les ACT_EVERY ticks)
+    ENTERPRISE_CEILING_MULT: 1.15, // cible = valeur nette du joueur × ce facteur
     // La course aux filons : les maisons riches achètent des concessions
     // sur les gisements riches — le filon que vous lorgnez peut partir.
     CLAIM_CHANCE: 0.05,      // par délibération, si assez riche
@@ -413,6 +432,7 @@ export const CONFIG = {
     },
     BUY_MIN_TIER: 2, // les chantiers civils sont sur les mondes établis
     MAX_FLEET: 100,  // garde-fou purement technique
+    RESALE: 0.6,     // remboursement à la revente d'un vaisseau
     NAMES: ['Le Colporteur', 'La Fortune', 'Le Tenace', "L'Opportun", 'Le Frugal',
       'La Comète', "L'Habile", 'Le Discret'],
 

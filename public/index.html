@@ -89,7 +89,16 @@
         </ul>
       </div>
       <div id="journal">
-        <button id="journal-toggle" class="section-label" title="Replier / déplier le journal">Journal <span id="journal-chevron">▾</span></button>
+        <div class="journal-head">
+          <button id="journal-toggle" class="section-label" title="Replier / déplier le journal">Journal <span id="journal-chevron">▾</span></button>
+          <span class="journal-filters">
+            <button class="journal-filter active" data-f="tout">tout</button>
+            <button class="journal-filter" data-f="guerre">guerre</button>
+            <button class="journal-filter" data-f="eco">éco</button>
+            <button class="journal-filter" data-f="monde">monde</button>
+            <button class="journal-filter" data-f="vous">vous</button>
+          </span>
+        </div>
         <ul id="journal-list"></ul>
       </div>
     </aside>

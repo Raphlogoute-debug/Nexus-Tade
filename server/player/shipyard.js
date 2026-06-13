@@ -117,6 +117,26 @@ export function equipShip(db, shipId, moduleId) {
   };
 }
 
+// Revendre un vaisseau au chantier : remboursement partiel du prix de la
+// classe. Impossible sur le dernier vaisseau ou en transit.
+export function sellShip(db, shipId) {
+  const ship = getShip(db, shipId);
+  if (!ship) return { ok: false, error: 'vaisseau inconnu' };
+  if (ship.planet_id === null) return { ok: false, error: 'vaisseau en transit' };
+  if (getFleet(db).length <= 1) return { ok: false, error: 'on ne revend pas son dernier vaisseau' };
+
+  const cls = SH.CLASSES[ship.class];
+  const refund = Math.round((cls?.price ?? 0) * SH.RESALE);
+  db.transaction(() => {
+    db.prepare('DELETE FROM missions WHERE ship_id = ?').run(shipId);
+    db.prepare('DELETE FROM ship_cargo WHERE ship_id = ?').run(shipId);
+    db.prepare('DELETE FROM ship_equipment WHERE ship_id = ?').run(shipId);
+    db.prepare('DELETE FROM ships WHERE id = ?').run(shipId);
+    adjustCredits(db, refund);
+  })();
+  return { ok: true, name: ship.name, refund };
+}
+
 export function setShipMode(db, shipId, mode) {
   if (!['manual', 'auto'].includes(mode)) return { ok: false, error: 'mode invalide (manual | auto)' };
   const ship = getShip(db, shipId);
