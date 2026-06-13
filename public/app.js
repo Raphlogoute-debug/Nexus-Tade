@@ -173,7 +173,19 @@ function isCollapsed(key) {
   return collapsePrefs[key] ?? DEFAULT_COLLAPSED.some((d) => key.startsWith(d));
 }
 
+// Transition de panneau : un fondu/glissement bref, joué seulement à la
+// NAVIGATION (clic système/planète, bouton de panneau) — jamais sur les
+// rafraîchissements live du polling, qui sinon feraient clignoter l'écran.
+let pendingPanelAnim = false;
+function animatePanelOnce() { pendingPanelAnim = true; }
+
 function enhancePanel() {
+  if (pendingPanelAnim) {
+    panel.classList.remove('panel-enter');
+    void panel.offsetWidth; // force le redémarrage de l'animation
+    panel.classList.add('panel-enter');
+    pendingPanelAnim = false;
+  }
   // 1. En-tête collant : ← retour + titre + sous-titre regroupés.
   if (panel.firstElementChild?.classList.contains('back-link')) {
     const head = document.createElement('div');
@@ -492,6 +504,50 @@ function drawStarfield(t) {
     }
   }
   ctx.globalAlpha = 1;
+  drawComets(t);
+}
+
+// Comètes : de loin en loin, une traînée file en travers du ciel. Pur
+// décor — quelques-unes à la fois, en coordonnées écran (indépendantes
+// de la caméra), pour donner vie au vide sans distraire.
+const comets = [];
+let nextCometAt = 2;
+function drawComets(t) {
+  const v = state.view;
+  if (t > nextCometAt && comets.length < 2) {
+    const edge = Math.random();
+    comets.push({
+      x: edge * v.w, y: -20,
+      vx: (Math.random() - 0.5) * 80 + 40,
+      vy: 70 + Math.random() * 90,
+      born: t, life: 2.6 + Math.random() * 1.5,
+    });
+    nextCometAt = t + 7 + Math.random() * 16;
+  }
+  for (let i = comets.length - 1; i >= 0; i--) {
+    const c = comets[i];
+    const age = t - c.born;
+    if (age > c.life) { comets.splice(i, 1); continue; }
+    const x = c.x + c.vx * age;
+    const y = c.y + c.vy * age;
+    const fade = Math.sin((age / c.life) * Math.PI); // apparaît puis s'efface
+    const len = 38;
+    const dx = c.vx, dy = c.vy;
+    const d = Math.hypot(dx, dy) || 1;
+    const grad = ctx.createLinearGradient(x - dx / d * len, y - dy / d * len, x, y);
+    grad.addColorStop(0, 'rgba(180, 220, 255, 0)');
+    grad.addColorStop(1, `rgba(210, 235, 255, ${0.5 * fade})`);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x - dx / d * len, y - dy / d * len);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.fillStyle = `rgba(235, 245, 255, ${0.85 * fade})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 // — Territoires ——————————————————————————————————————————————
@@ -709,7 +765,9 @@ function drawSystems(t) {
     if (isHover || isSelected) alpha = 1;
 
     const sprite = glowSprite(color, Math.round(r * 2) / 2);
-    ctx.globalAlpha = alpha;
+    // Respiration discrète, déphasée par système (le ciel n'est pas figé).
+    const pulse = isHover || isSelected ? 1 : 0.9 + 0.1 * Math.sin(t * 0.8 + sys.id * 1.3);
+    ctx.globalAlpha = alpha * pulse;
     ctx.drawImage(sprite, sx - sprite.width / 2, sy - sprite.height / 2);
     ctx.globalAlpha = 1;
 
@@ -1209,7 +1267,7 @@ function selectSystem(sys) {
   state.selectedSystem = sys;
   state.selectedPlanet = null;
   state.tradeSel = null;
-  drawMap();
+  animatePanelOnce();
   renderSystemPanel(sys);
 }
 
@@ -1309,6 +1367,7 @@ async function renderSystemPanel(sys) {
 async function selectPlanet(planetId) {
   state.selectedPlanet = planetId;
   state.tradeSel = null;
+  animatePanelOnce();
   await refreshPlanetPanel();
 }
 
@@ -2425,6 +2484,7 @@ $('#heat-off').addEventListener('click', () => {
 });
 
 async function renderMarketsPanel() {
+  animatePanelOnce();
   state.selectedPlanet = null;
   state.guideFlags.sawMarkets = true;
   const scan = await api(`/market-scan/${state.marketSel}`);
@@ -2516,6 +2576,7 @@ $('#btn-markets').addEventListener('click', renderMarketsPanel);
 // ── Panneau : objectifs / fin de partie ──────────────────────────
 
 async function renderObjectivesPanel() {
+  animatePanelOnce();
   const objectives = await api('/objectives');
   state.selectedPlanet = null;
   state.guideFlags.sawObjectives = true;
@@ -2558,6 +2619,7 @@ $('#btn-objectives').addEventListener('click', renderObjectivesPanel);
 // ── Panneau : guerres — le tableau de bord du profiteur ──────────
 
 async function renderWarsPanel() {
+  animatePanelOnce();
   const data = await api('/wars');
   state.selectedPlanet = null;
 
@@ -2659,6 +2721,7 @@ function shipWhereabouts(ship) {
 }
 
 async function renderFleetPanel() {
+  animatePanelOnce();
   const routes = await api('/routes');
   state.selectedPlanet = null;
   const p = state.player;
@@ -2813,6 +2876,7 @@ function lineSpark(points, color, w = 350, h = 56) {
 }
 
 async function renderObservatoryPanel() {
+  animatePanelOnce();
   const obs = await api('/observatory');
   state.selectedPlanet = null;
 
@@ -2945,6 +3009,7 @@ function netWorthSpark(history, color, w = 320, h = 44) {
 }
 
 async function renderHousePanel() {
+  animatePanelOnce();
   state.selectedPlanet = null;
   const [house, stats] = await Promise.all([api('/house'), api('/stats')]);
   state.house = house;
@@ -3268,6 +3333,7 @@ $('#victory-close').addEventListener('click', () => { $('#victory').hidden = tru
 // ── Panneau : technologies ───────────────────────────────────────
 
 async function renderTechPanel() {
+  animatePanelOnce();
   const techs = await api('/tech');
   state.selectedPlanet = null;
 
@@ -3333,6 +3399,7 @@ function actionSummary(a) {
 }
 
 async function renderRoutesPanel() {
+  animatePanelOnce();
   const routes = await api('/routes');
   state.selectedPlanet = null;
 
@@ -3520,6 +3587,7 @@ $('#btn-routes').addEventListener('click', renderRoutesPanel);
 // ── Panneau : faction ────────────────────────────────────────────
 
 async function renderFactionPanel(factionId) {
+  animatePanelOnce();
   const f = await api(`/faction/${factionId}`);
   state.selectedPlanet = null;
 
