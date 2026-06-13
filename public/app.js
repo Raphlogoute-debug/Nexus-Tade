@@ -4162,7 +4162,80 @@ function renderHudPlayer() {
     loc.textContent = `${ship.name} — en transit vers ${dest.planet.name} (arr. ${dateShort(ship.arrival_tick)})`;
     $('#btn-skip').hidden = false;
   }
+  renderGoalStrip();
 }
+
+// ── Cap suivant : le prochain palier qu'on dangle en permanence ──
+// La carotte de la courbe de progression : on calcule l'achat utile le
+// plus proche que le joueur ne peut PAS encore s'offrir, et on montre la
+// barre se remplir. Quand il devient accessible, on le célèbre.
+let goalReachedKey = null;
+function computeNextGoals() {
+  const p = state.player;
+  if (!p) return [];
+  const g = [];
+  for (const c of p.concessions ?? []) {
+    if (c.nextLevelCost) g.push({ k: `up${c.id}`, cost: c.nextLevelCost,
+      label: `Améliorer la concession de ${c.planetName}`, hint: 'extraction ×↑', panel: 'planet', planetId: c.planet_id });
+  }
+  if ((p.concessions ?? []).length < p.maxConcessions && p.nextConcessionPrice) {
+    g.push({ k: 'conc', cost: p.nextConcessionPrice, label: 'Une nouvelle concession', hint: 'un site minier de plus' });
+  }
+  if ((p.ships ?? []).length < p.maxFleet) {
+    for (const [, c] of Object.entries(p.shipClasses ?? {})) {
+      g.push({ k: `ship${c.label}`, cost: c.price, label: `Un ${c.label}`, hint: `soute ${fmtQty(c.cargo)}` });
+    }
+  }
+  if ((p.posts ?? []).length < p.maxPosts && p.nextPostPrice) {
+    g.push({ k: 'post', cost: p.nextPostPrice, label: 'Un comptoir commercial', hint: 'ordres permanents' });
+  }
+  const hq = state.house?.hq;
+  if (hq?.nextCost) g.push({ k: 'hq', cost: hq.nextCost,
+    label: hq.level === 0 ? 'Bâtir votre quartier général' : 'Agrandir le quartier général', hint: 'bonus de flotte', panel: 'house' });
+  for (const t of [2, 3]) {
+    const ti = p.tiers?.[t];
+    if (ti && !ti.unlocked) g.push({ k: `lic${t}`, cost: ti.licenceCost, label: `Licence de marché T${t}`, hint: 'accès aux grands mondes' });
+  }
+  return g.sort((a, b) => a.cost - b.cost);
+}
+
+function renderGoalStrip() {
+  const el = $('#goal-strip');
+  const p = state.player;
+  const goals = computeNextGoals();
+  const credits = p?.credits ?? 0;
+  // Le cap = le moins cher qu'on ne peut pas encore s'offrir.
+  const next = goals.find((x) => x.cost > credits)
+    ?? [...goals].reverse().find((x) => x.cost <= credits); // sinon : le plus gros à portée
+  if (!next) { el.hidden = true; return; }
+  el.hidden = false;
+  const pct = Math.min(100, Math.round((credits / next.cost) * 100));
+  const ready = credits >= next.cost;
+  el.classList.toggle('ready', ready);
+  el.innerHTML = `<span class="goal-cap">${ready ? '✓ À votre portée' : '▸ Cap suivant'}</span>
+    <span class="goal-label">${next.label} <span class="goal-hint">· ${next.hint}</span></span>
+    <span class="goal-bar"><span style="width:${pct}%"></span></span>
+    <span class="goal-num">${fmtQty(Math.min(credits, next.cost))} / ${fmtQty(next.cost)} cr</span>`;
+  el.dataset.panel = next.panel ?? '';
+  el.dataset.planet = next.planetId ?? '';
+  // Célébration unique au franchissement.
+  if (ready && goalReachedKey !== next.k) {
+    goalReachedKey = next.k;
+    toast(`Objectif atteint : ${next.label} est à votre portée`, 'good');
+    playSound('objective');
+  } else if (!ready) {
+    goalReachedKey = null;
+  }
+}
+
+$('#goal-strip').addEventListener('click', () => {
+  const el = $('#goal-strip');
+  if (el.dataset.panel === 'house') renderHousePanel();
+  else if (el.dataset.panel === 'planet' && el.dataset.planet) {
+    const entry = state.planetIndex.get(Number(el.dataset.planet));
+    if (entry) { selectSystem(entry.system); selectPlanet(entry.planet.id); }
+  } else renderObjectivesPanel();
+});
 
 // ── Contrôles du temps ───────────────────────────────────────────
 
