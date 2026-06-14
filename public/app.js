@@ -314,6 +314,44 @@ function gameFlagKey(name) { return `nx-${name}-${state.universe?.seed ?? 0}`; }
 function gameFlag(name) { try { return localStorage.getItem(gameFlagKey(name)) === '1'; } catch { return false; } }
 function setGameFlag(name) { try { localStorage.setItem(gameFlagKey(name), '1'); } catch { /* navigation privée */ } }
 
+// Invite de découverte « une seule fois » : un nouveau système devient
+// pertinent → on l'explique, on fait briller son bouton un instant, puis
+// plus jamais. Renvoie true si l'invite a bien été montrée cette fois.
+function discoverOnce(flag, message, targetSel, ms = 9000) {
+  if (gameFlag(flag)) return false;
+  setGameFlag(flag);
+  toast(message, 'warn', ms);
+  playSound('objective');
+  if (targetSel) {
+    for (const el of document.querySelectorAll(targetSel)) {
+      el.classList.add('discover-pulse');
+      setTimeout(() => el.classList.remove('discover-pulse'), 12000);
+    }
+  }
+  return true;
+}
+
+// Déblocages détectés au fil de l'eau (depuis le résumé `discoverable` du
+// serveur) : on signale chaque grand système la première fois qu'il s'ouvre.
+function checkDiscoveries() {
+  const d = state.player?.discoverable;
+  if (!d) return;
+  if (d.contracts) {
+    discoverOnce('disc-contracts',
+      `Vous avez l'envergure de traiter avec les royaumes eux-mêmes : leurs appels `
+      + `d'offres paient au-dessus du marché (×1,35, davantage en guerre). Ils `
+      + `apparaissent sur la fiche d'une faction et dans ⚔ GUERRES.`,
+      '#btn-wars');
+  }
+  if (d.hq) {
+    discoverOnce('disc-hq',
+      `Vous pouvez fonder votre quartier général (60 000 cr) : il allège `
+      + `l'entretien de la flotte, agrandit son plafond et remise les relevés `
+      + `de marché. Ça se passe dans MAISON.`,
+      '#btn-house');
+  }
+}
+
 // Texte flottant sur la carte (coordonnées carte) : monte et s'efface.
 state.floaters = [];
 
@@ -646,9 +684,11 @@ function glowSprite(color, r) {
   return c;
 }
 
-// Rayon écran du cœur d'une étoile (le halo s'étend bien au-delà).
+// Rayon écran du cœur d'une étoile (le halo s'étend bien au-delà). Une base
+// un peu plus généreuse donne aux systèmes une présence lumineuse même au
+// dézoom, sans grossir exagérément une fois rapproché.
 function starRadius(system) {
-  return (2.4 + system.planets.length * 0.5) * Math.pow(state.view.zoom, 0.55);
+  return (2.8 + system.planets.length * 0.5) * Math.pow(state.view.zoom, 0.55);
 }
 
 // Opacité selon la fraîcheur de la connaissance du système :
@@ -718,11 +758,20 @@ function drawLanes() {
   for (const lane of state.lanes) {
     const [x1, y1] = toScreen(lane.fx, lane.fy);
     const [x2, y2] = toScreen(lane.tx, lane.ty);
+    // Arc doux (carte de routes aériennes) dont l'éclat et l'épaisseur
+    // croissent avec le trafic : les grandes artères commerciales se
+    // détachent, dessinant le réseau vivant de la galaxie d'un coup d'œil.
+    const intensity = Math.min(1, lane.n / 5);
+    const dx = x2 - x1, dy = y2 - y1;
+    const d = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(26, d * 0.12);
+    const cx = (x1 + x2) / 2 - dy / d * bow;
+    const cy = (y1 + y2) / 2 + dx / d * bow;
     ctx.beginPath();
     ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.strokeStyle = withAlpha(lane.color, Math.min(0.13, 0.03 + lane.n * 0.02));
-    ctx.lineWidth = 1;
+    ctx.quadraticCurveTo(cx, cy, x2, y2);
+    ctx.strokeStyle = withAlpha(lane.color, 0.06 + intensity * 0.20);
+    ctx.lineWidth = 0.8 + intensity * 1.1;
     ctx.stroke();
   }
 }
@@ -2071,13 +2120,22 @@ function renderDockedPanel(planet, market) {
     });
   }
 
-  $('#btn-flag')?.addEventListener('click', async () => {
-    const r = await apiPost(`/ships/${shipId}/flag`);
-    if (r.ok) log(`${r.shipName} navigue désormais sous pavillon de complaisance (−${fmtQty(r.cost)} cr)`);
-    else log(`Pavillon refusé : ${r.error}`);
-    await refreshPlayerAndKnowledge();
-    refreshPlanetPanelForce();
-  });
+  if ($('#btn-flag')) {
+    $('#btn-flag').addEventListener('click', async () => {
+      const r = await apiPost(`/ships/${shipId}/flag`);
+      if (r.ok) log(`${r.shipName} navigue désormais sous pavillon de complaisance (−${fmtQty(r.cost)} cr)`);
+      else log(`Pavillon refusé : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      refreshPlanetPanelForce();
+    });
+    // Découverte : la contrebande, expliquée la première fois qu'elle est
+    // accessible (un vaisseau à quai dans la Frange).
+    discoverOnce('disc-flag',
+      `Contrebande : sous pavillon de complaisance, vos ventes deviennent `
+      + `anonymes — vous fournissez les DEUX camps d'une guerre sans que votre `
+      + `réputation n'en pâtisse, et vous forcez les blocus. L'arme du profiteur.`,
+      '#btn-flag');
+  }
 
   $('#btn-buy-concession')?.addEventListener('click', async () => {
     const r = await apiPost('/concessions/buy', { shipId });
@@ -4244,6 +4302,7 @@ function renderHudPlayer() {
     $('#btn-skip').hidden = false;
   }
   renderGoalStrip();
+  checkDiscoveries();
 }
 
 // ── Cap suivant : le prochain palier qu'on dangle en permanence ──

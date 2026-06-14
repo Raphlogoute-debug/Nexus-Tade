@@ -416,6 +416,7 @@ export function createApiRouter(db, clock) {
   // ── GET /api/player : joueur, flotte, cargo, concession ────────
   router.get('/player', (req, res) => {
     const player = getPlayer(db);
+    const partnerCount = db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n;
     const ships = getFleet(db).map((s) => ({
       ...s,
       classLabel: CONFIG.SHIPS.CLASSES[s.class]?.label ?? s.class,
@@ -477,7 +478,15 @@ export function createApiRouter(db, clock) {
       pacts: listPacts(db),
       equipmentCatalog: CONFIG.SHIPS.EQUIPMENT,
       loans: listLoans(db),
-      tradePartners: db.prepare('SELECT COUNT(*) AS n FROM trade_partners').get().n,
+      tradePartners: partnerCount,
+      // Déblocages à signaler une fois (invites de découverte côté client) :
+      // seuils gardés ici, autoritaires. Contrats = traiter avec les royaumes
+      // (prestige + partenaires) ; QG = on peut fonder son siège.
+      discoverable: {
+        contracts: player.prestige >= CONFIG.CONTRACTS.PRESTIGE_REQUIRED
+          && partnerCount >= CONFIG.CONTRACTS.PARTNERS_REQUIRED,
+        hq: player.credits >= CONFIG.PLAYER.HQ.BUILD_COST && (player.hq_level ?? 0) === 0,
+      },
       // Classement résumé : votre rang et les maisons qui vous encadrent.
       // De quoi alimenter la course au classement dans le bandeau d'objectif
       // (le vrai moteur de fin de partie, quand tout le reste est à portée).
