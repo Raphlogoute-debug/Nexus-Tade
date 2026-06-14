@@ -382,7 +382,7 @@ function drawFloaters() {
 // Catégorie d'une entrée pour le filtrage du journal.
 const EVENT_CAT = {
   war: 'guerre', peace: 'guerre', conquest: 'guerre', profiteer: 'guerre',
-  seizure: 'guerre', intel: 'guerre', smuggle: 'guerre', loan: 'guerre',
+  seizure: 'guerre', intel: 'guerre', smuggle: 'guerre', loan: 'guerre', piracy: 'guerre',
   mission: 'eco', client: 'eco', objective: 'eco', victory: 'eco', rival: 'eco',
   colony: 'monde', lair: 'monde', megaproject: 'monde', pact: 'monde',
   fleet: 'monde', arrival: 'monde',
@@ -4702,7 +4702,9 @@ async function init() {
   }
 
   renderHudState(s);
-  await refreshPlayerAndKnowledge();
+  // La maison est chargée AVANT le premier rendu du HUD : sinon le bandeau
+  // d'objectif manque le cap « quartier général » à la première frame.
+  await Promise.all([refreshPlayerAndKnowledge(), refreshHouse().catch(() => {})]);
   renderHudPlayer();
   resizeCanvas();
   renderTerritoryLayer();
@@ -4720,7 +4722,7 @@ async function init() {
     await selectPlanet(entry.planet.id);
   }
 
-  await Promise.all([refreshAlerts(), refreshHouse().catch(() => {}), refreshTraffic().catch(() => {})]);
+  await Promise.all([refreshAlerts(), refreshTraffic().catch(() => {})]);
   startRenderLoop();
   log('Bienvenue à bord. Votre concession produit — chargez, voyagez, vendez plus cher.');
   updateGuide();

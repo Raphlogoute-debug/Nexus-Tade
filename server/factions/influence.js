@@ -27,6 +27,17 @@ export function supportOf(db, factionId) {
     .get(factionId)?.support ?? 0;
 }
 
+// Solde le soutien accumulé envers des factions (à la fin d'une guerre) :
+// il ne doit pas se reporter sur une guerre future sans rapport, sinon on
+// vous crédite « faiseur de rois » pour un conflit que vous n'avez pas armé.
+export function clearWarSupport(db, factionIds) {
+  const ids = factionIds.filter((id) => id != null);
+  if (ids.length === 0) return;
+  db.prepare(
+    `DELETE FROM war_support WHERE faction_id IN (${ids.map(() => '?').join(',')})`
+  ).run(...ids);
+}
+
 // Décroissance lente, chaque tick — le soutien s'efface si on n'aide plus.
 export function tickInfluence(db) {
   db.prepare('UPDATE war_support SET support = ROUND(support * ?, 3)').run(I.DECAY);
@@ -38,9 +49,13 @@ export function tickInfluence(db) {
 export function attributeConquest(db, tick, winnerId, loserId, systemName) {
   const sw = supportOf(db, winnerId);
   if (sw < I.ATTRIBUTION_MIN || sw <= supportOf(db, loserId) * I.DOMINANCE) return;
-  const last = Number(getMeta(db, 'last_profiteer_tick') ?? -999);
+  // Anti-spam PAR GUERRE (paire de factions), pas global : sinon une
+  // conquête dans une guerre étouffe le crédit d'une conquête simultanée
+  // dans une autre guerre que vous armez aussi.
+  const key = `last_profiteer_${Math.min(winnerId, loserId)}_${Math.max(winnerId, loserId)}`;
+  const last = Number(getMeta(db, key) ?? -999);
   if (tick - last < I.GAP_TICKS) return;
-  setMeta(db, 'last_profiteer_tick', tick);
+  setMeta(db, key, tick);
 
   addPrestige(db, I.CONQUEST_PRESTIGE);
   const w = db.prepare('SELECT name FROM factions WHERE id = ?').get(winnerId);

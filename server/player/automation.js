@@ -66,7 +66,15 @@ export function tickAutoShips(db, tick) {
       const candidates = markets.filter((m) => m.resource_id === main.resource_id);
       const here = candidates.find((m) => m.planet_id === ship.planet_id);
       const best = candidates.sort((a, b) => b.price - a.price)[0];
-      if (!best) continue;
+      if (!best) {
+        // Aucun marché ACCESSIBLE à portée pour le lot principal : on se
+        // déplace plutôt que de rester planté à vie avec la cargaison.
+        if (markets.length > 0) {
+          const target = markets[Math.floor(Math.random() * markets.length)];
+          if (target.planet_id !== ship.planet_id) startTravel(db, target.planet_id, tick, ship.id, 'auto');
+        }
+        continue;
+      }
 
       const extraElsewhere = here && best.planet_id !== ship.planet_id
         ? (best.price - here.price) * main.quantity : -1;

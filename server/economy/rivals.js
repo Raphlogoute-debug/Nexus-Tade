@@ -61,7 +61,10 @@ export function rivalNetWorth(db, rival) {
 
 const upsertHolding = `
   INSERT INTO rival_holdings (rival_id, resource_id, quantity, avg_cost) VALUES (?, ?, ?, ?)
-  ON CONFLICT(rival_id, resource_id) DO UPDATE SET quantity = ROUND(quantity + excluded.quantity, 2)`;
+  ON CONFLICT(rival_id, resource_id) DO UPDATE SET
+    avg_cost = ROUND((quantity * avg_cost + excluded.quantity * excluded.avg_cost)
+                     / (quantity + excluded.quantity), 4),
+    quantity = ROUND(quantity + excluded.quantity, 2)`;
 
 // Le volume d'une maison croît avec sa richesse : une grande maison
 // brasse bien plus qu'un débutant. C'est ce qui leur permet de COMPOUNDER
@@ -211,52 +214,56 @@ function tickRivalConcessions(db) {
 
 export function tickRivals(db, tick) {
   const rivals = db.prepare('SELECT * FROM rivals').all();
-  if (rivals.length === 0) return;
-  tickRivalConcessions(db);
-
   // Un échantillon de planètes partagé par tous les rivaux de ce tick.
   const sample = db.prepare(
     'SELECT id FROM planets ORDER BY RANDOM() LIMIT ?'
   ).all(R.SCAN_PLANETS).map((p) => p.id);
-  if (sample.length < 2) return;
 
-  // Le plafond du revenu d'entreprise se recale sur la valeur nette du
-  // joueur : une cible mouvante qui rend les rivaux toujours pertinents,
-  // quelle que soit la vitesse à laquelle vous jouez.
-  const ceiling = Math.max(R.START_CREDITS, playerNetWorthLite(db) * R.ENTERPRISE_CEILING_MULT);
+  // Activité des maisons rivales : seulement s'il y en a et qu'il y a de quoi
+  // arbitrer. (L'historique, lui, est enregistré quoi qu'il arrive — voir bas.)
+  if (rivals.length > 0 && sample.length >= 2) {
+    tickRivalConcessions(db);
+    // Le plafond du revenu d'entreprise se recale sur la valeur nette du
+    // joueur : une cible mouvante qui rend les rivaux toujours pertinents,
+    // quelle que soit la vitesse à laquelle vous jouez.
+    const ceiling = Math.max(R.START_CREDITS, playerNetWorthLite(db) * R.ENTERPRISE_CEILING_MULT);
 
-  db.transaction(() => {
-    for (const rival of rivals) {
-      if (rival.cornering_resource || rival.cornering_until) {
-        tickCorner(db, rival, tick);
-        continue; // une maison qui accapare ne fait que ça
-      }
-      if ((tick + rival.id) % R.ACT_EVERY !== 0) continue;
-      tryArbitrage(db, rival, sample);
-      maybeStartCorner(db, rival, tick, sample);
-      maybeClaimDeposit(db, rival, tick);
-      // Revenu d'entreprise : retour composé sur la valeur nette, mais le
-      // rendement s'éteint à mesure qu'on approche du plafond (logistique).
-      // Négligeable au début — l'arbitrage domine — décisif en milieu de
-      // partie, nul une fois la maison au niveau du joueur.
-      if (rival.net_worth > 0 && rival.net_worth < ceiling) {
-        const slack = 1 - rival.net_worth / ceiling; // 1 = loin derrière, 0 = au niveau
-        const income = Math.round(rival.net_worth * R.ENTERPRISE_RETURN * slack * 100) / 100;
-        if (income > 0) {
-          db.prepare('UPDATE rivals SET credits = ROUND(credits + ?, 2) WHERE id = ?')
-            .run(income, rival.id);
+    db.transaction(() => {
+      for (const rival of rivals) {
+        if (rival.cornering_resource || rival.cornering_until) {
+          tickCorner(db, rival, tick);
+          continue; // une maison qui accapare ne fait que ça
+        }
+        if ((tick + rival.id) % R.ACT_EVERY !== 0) continue;
+        tryArbitrage(db, rival, sample);
+        maybeStartCorner(db, rival, tick, sample);
+        maybeClaimDeposit(db, rival, tick);
+        // Revenu d'entreprise : retour composé sur la valeur nette, mais le
+        // rendement s'éteint à mesure qu'on approche du plafond (logistique).
+        // Négligeable au début — l'arbitrage domine — décisif en milieu de
+        // partie, nul une fois la maison au niveau du joueur.
+        if (rival.net_worth > 0 && rival.net_worth < ceiling) {
+          const slack = 1 - rival.net_worth / ceiling; // 1 = loin derrière, 0 = au niveau
+          const income = Math.round(rival.net_worth * R.ENTERPRISE_RETURN * slack * 100) / 100;
+          if (income > 0) {
+            db.prepare('UPDATE rivals SET credits = ROUND(credits + ?, 2) WHERE id = ?')
+              .run(income, rival.id);
+          }
         }
       }
-    }
 
-    // Valeur nette : recalcul à chaque tick (peu de rivaux), historisée
-    // régulièrement pour le graphe de classement.
-    for (const rival of db.prepare('SELECT * FROM rivals').all()) {
-      db.prepare('UPDATE rivals SET net_worth = ? WHERE id = ?')
-        .run(rivalNetWorth(db, rival), rival.id);
-    }
-    if (tick % R.HISTORY_EVERY === 0) recordNetWorthHistory(db, tick);
-  })();
+      // Valeur nette : recalcul à chaque tick (peu de rivaux).
+      for (const rival of db.prepare('SELECT * FROM rivals').all()) {
+        db.prepare('UPDATE rivals SET net_worth = ? WHERE id = ?')
+          .run(rivalNetWorth(db, rival), rival.id);
+      }
+    })();
+  }
+
+  // L'historique de valeur nette (joueur + Observatoire de l'empire, et les
+  // rivaux s'il y en a) NE DOIT PAS dépendre de l'existence de rivaux : sinon
+  // une partie sans rival fige le classement et les courbes du joueur.
+  if (tick % R.HISTORY_EVERY === 0) recordNetWorthHistory(db, tick);
 }
 
 // Historique de valeur nette : joueur + rivaux, échantillonné et borné.

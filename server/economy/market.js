@@ -11,6 +11,10 @@ export function marketContext(db, planetId, resourceId) {
   const row = db.prepare(
     'SELECT stock, price, consumption FROM planet_resources WHERE planet_id = ? AND resource_id = ?'
   ).get(planetId, resourceId);
+  // Marché inexistant (ne devrait pas arriver — chaque planète a chaque
+  // ressource) : on renvoie null pour que les gardes `if (!m)` des appelants
+  // (PNJ, rivaux, autos) protègent vraiment, au lieu de lever une exception.
+  if (!row) return null;
   const industries = db.prepare(
     'SELECT recipe_id, rate FROM planet_industries WHERE planet_id = ?'
   ).all(planetId);
@@ -44,6 +48,7 @@ export function applyMarketTrade(db, planetId, resourceId, quantity, side, marke
   ).run(newStock, newPrice, planetId, resourceId);
 
   return {
+    quantity, // quantité RÉELLEMENT échangée (bornée au stock côté achat)
     unitPrice,
     total: Math.round(unitPrice * quantity * 100) / 100,
     newStock,

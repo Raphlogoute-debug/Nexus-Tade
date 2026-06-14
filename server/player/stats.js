@@ -3,10 +3,10 @@
 // le panneau MAISON et son graphe d'évolution.
 
 import { RESOURCES } from '../../data/resources.js';
-import { recipeOutput } from '../../data/recipes.js';
 import { CONFIG } from '../config.js';
 import { getPlayer } from './state.js';
 import { renownOf } from './house.js';
+import { industryValuation } from './investments.js';
 
 const HQ = CONFIG.PLAYER.HQ;
 
@@ -27,10 +27,14 @@ export function netWorthBreakdown(db) {
      FROM industry_shares ish JOIN planet_industries pi
        ON pi.planet_id = ish.planet_id AND pi.recipe_id = ish.recipe_id`
   ).all();
+  // Valorisées à leur PRIX D'ACQUISITION (la même formule que l'achat de
+  // parts), pour que la valeur nette reflète le capital réellement immobilisé
+  // — cohérent avec la base « au coût » des maisons rivales. L'ancienne
+  // formule omettait `output` et la marge de dividende, gonflant le score
+  // d'un facteur 5/output.
   let industryValue = 0;
   for (const s of shares) {
-    const out = RESOURCES[recipeOutput(s.recipe_id)];
-    industryValue += s.share * s.rate * (out?.basePrice ?? 0) * CONFIG.PLAYER.INVEST.PAYBACK_TICKS;
+    industryValue += industryValuation(s.recipe_id, s.rate) * s.share;
   }
 
   // Quartier général : capital immobilisé (coût de construction cumulé).
@@ -69,7 +73,10 @@ export function leaderboard(db) {
     isPlayer: false,
   }));
   const all = [me, ...rivals].sort((a, b) => b.netWorth - a.netWorth);
-  all.forEach((e, i) => { e.rank = i + 1; });
+  // Classement à l'ancienne : deux valeurs nettes égales partagent le rang.
+  all.forEach((e, i) => {
+    e.rank = i > 0 && e.netWorth === all[i - 1].netWorth ? all[i - 1].rank : i + 1;
+  });
   return all;
 }
 

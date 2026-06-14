@@ -58,6 +58,7 @@ import {
 } from '../player/knowledge.js';
 import { generateFactions } from '../factions/generate.js';
 import { initTraders } from '../npc/traders.js';
+import { initRivals } from '../economy/rivals.js';
 import { marketContext } from '../economy/market.js';
 import { listContracts, deliverContract, contractAccess } from '../factions/contracts.js';
 import { activeWars, warContext } from '../factions/war.js';
@@ -1136,6 +1137,7 @@ export function createApiRouter(db, clock) {
     const result = generateUniverse(db, seed);
     const factions = generateFactions(db);
     const traders = initTraders(db);
+    initRivals(db); // sinon : maisons rivales absentes → classement ET historique du joueur figés
     const game = initPlayer(db);
     setMeta(db, 'time_speed', clock.getSpeed());
     res.json({ ...result, ...factions, ...traders, ...game });

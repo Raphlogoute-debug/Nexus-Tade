@@ -7,7 +7,7 @@
 import { CONFIG } from '../config.js';
 import { logEvent } from '../events.js';
 import { resolveWarLoans } from './loans.js';
-import { attributeConquest, attributeWarEnd } from './influence.js';
+import { attributeConquest, attributeWarEnd, clearWarSupport } from './influence.js';
 
 const W = CONFIG.WAR;
 
@@ -53,7 +53,15 @@ export function tickWars(db, tick) {
     const sAtt = attacker.fleet * attacker.readiness;
     const sDef = defender.fleet * defender.readiness;
     const total = sAtt + sDef;
-    if (total <= 0) continue;
+    // Deux flottes anéanties : la guerre est militairement morte. On la
+    // clôt (épuisement mutuel) au lieu de la laisser traîner jusqu'au
+    // plafond de durée sans que rien ne se passe.
+    if (total <= 0) {
+      if (tick - war.started_tick >= W.MIN_DURATION) {
+        endWar(db, tick, war, 'peace', attacker, defender);
+      }
+      continue;
+    }
 
     // 1. Attrition : chacun perd proportionnellement à la force adverse.
     const lossAtt = W.ATTRITION * sDef * (0.8 + Math.random() * 0.4);
@@ -112,7 +120,7 @@ function endWar(db, tick, war, result, attacker, defender) {
 
   const message = result === 'peace'
     ? `PAIX — ${attacker.name} et ${defender.name} signent une paix d'épuisement`
-    : `PAIX — ${(result === 'attacker' ? attacker : defender).name} l'emporte sur `
+    : `VICTOIRE — ${(result === 'attacker' ? attacker : defender).name} l'emporte sur `
       + `${(result === 'attacker' ? defender : attacker).name}`;
   logEvent(db, tick, 'peace', message, null);
 
@@ -121,6 +129,9 @@ function endWar(db, tick, war, result, attacker, defender) {
   const winnerId = result === 'attacker' ? war.attacker_id
     : result === 'defender' ? war.defender_id : null;
   attributeWarEnd(db, tick, winnerId);
+  // Le soutien envers ces factions est soldé : il ne doit pas se reporter
+  // sur une guerre future sans rapport. (Après attribution, jamais avant.)
+  clearWarSupport(db, [war.attacker_id, war.defender_id]);
 }
 
 function round2(n) {

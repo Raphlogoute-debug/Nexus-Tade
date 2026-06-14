@@ -138,8 +138,11 @@ export function tickTraders(db, tick) {
     for (const resourceId of RESOURCE_IDS) {
       const here = local.get(resourceId);
       if (!here || here.stock < 20) continue;
+      // Marge pour le glissement de prix (×1,1, comme les rivaux) : sans
+      // elle, le coût réel peut dépasser la trésorerie et la dette est
+      // ensuite silencieusement effacée (création de monnaie).
       const qty = Math.floor(Math.min(
-        T.CAPACITY, here.stock * T.MAX_BUY_SHARE, trader.credits / here.price));
+        T.CAPACITY, here.stock * T.MAX_BUY_SHARE, trader.credits / (here.price * 1.1)));
       if (qty < 5) continue;
 
       for (const m of markets) {
@@ -154,8 +157,10 @@ export function tickTraders(db, tick) {
 
     if (best) {
       const buy = applyMarketTrade(db, trader.planet_id, best.resourceId, best.qty, 'buy');
+      // On enregistre la quantité RÉELLEMENT achetée (bornée au stock du
+      // moment, scan en cache pouvant être périmé) — pas de cargaison fantôme.
       saveCargo.run(Math.round((trader.credits - buy.total) * 100) / 100,
-        best.resourceId, best.qty, buy.unitPrice, trader.id);
+        best.resourceId, buy.quantity, buy.unitPrice, trader.id);
       const d = dist(best.dest);
       depart.run(trader.planet_id, tick, best.dest.planet_id, tick + travelTicks(d),
         d * T.MOVE_COST_PER_DIST, trader.id);
