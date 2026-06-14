@@ -500,6 +500,9 @@ const MIGRATIONS = [
   { table: 'missions', column: 'recurring', ddl: 'ALTER TABLE missions ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0' },
   { table: 'missions', column: 'quantity0', ddl: 'ALTER TABLE missions ADD COLUMN quantity0 REAL NOT NULL DEFAULT 0' },
   { table: 'routes', column: 'always_escort', ddl: 'ALTER TABLE routes ADD COLUMN always_escort INTEGER NOT NULL DEFAULT 0' },
+  // Profit net réalisé à vie par vaisseau (tableau de bord de flotte) : qui
+  // tire son poids quand l'empire compte des dizaines de vaisseaux.
+  { table: 'ships', column: 'lifetime_profit', ddl: 'ALTER TABLE ships ADD COLUMN lifetime_profit REAL NOT NULL DEFAULT 0' },
 ];
 
 export function createDb(path) {

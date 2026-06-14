@@ -23,7 +23,7 @@ import {
 } from '../player/house.js';
 import { statsSnapshot, leaderboard } from '../player/stats.js';
 import { SCENARIOS } from '../../data/scenarios.js';
-import { createRoute, listRoutes, deleteRoute, assignRoute } from '../player/routes.js';
+import { createRoute, listRoutes, deleteRoute, assignRoute, cloneRoute } from '../player/routes.js';
 import {
   investIndustry, divestIndustry, foundIndustry, listInvestments, industryValuation, getShare,
 } from '../player/investments.js';
@@ -587,6 +587,12 @@ export function createApiRouter(db, clock) {
     answer(res, deleteRoute(db, id));
   });
 
+  router.post('/routes/:id/clone', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: 'id de route invalide' });
+    answer(res, cloneRoute(db, id));
+  });
+
   router.post('/ships/:id/route', (req, res) => {
     const id = parseId(req.params.id);
     const routeId = req.body?.routeId;
@@ -631,6 +637,31 @@ export function createApiRouter(db, clock) {
     const shipId = parseShipId(req.body?.shipId);
     if (quantity === null || shipId === null) return res.status(400).json({ error: 'paramètres invalides' });
     answer(res, refuel(db, quantity, shipId));
+  });
+
+  // ── Actions de flotte en masse (confort des grandes flottes) ───────
+  // Ravitaille d'un coup tous les vaisseaux à quai dont le réservoir n'est
+  // pas plein. Renvoie le nombre servi et le coût total.
+  router.post('/fleet/refuel', (req, res) => {
+    const docked = getFleet(db).filter((s) => s.planet_id !== null && s.fuel < s.fuel_capacity);
+    let count = 0; let total = 0;
+    for (const s of docked) {
+      const r = refuel(db, undefined, s.id);
+      if (r.ok) { count++; total += r.total; }
+    }
+    res.json({ ok: true, count, total: Math.round(total * 100) / 100 });
+  });
+
+  // Met en mode automatique tous les vaisseaux disponibles (manuels, à quai),
+  // sauf celui que le joueur pilote. De quoi remettre la flotte au travail
+  // d'un clic.
+  router.post('/fleet/auto-idle', (req, res) => {
+    const except = parseShipId(req.body?.exceptShipId ?? 0);
+    const idle = getFleet(db).filter(
+      (s) => s.mode === 'manual' && s.planet_id !== null && s.id !== except);
+    let count = 0;
+    for (const s of idle) { if (setShipMode(db, s.id, 'auto').ok) count++; }
+    res.json({ ok: true, count });
   });
 
   router.post('/licence', (req, res) => {

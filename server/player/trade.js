@@ -119,6 +119,10 @@ export function executeTrade(db, { side, resourceId, quantity, shipId }) {
       // à perte ne construit aucune réputation.
       const profit = (executed.unitPrice - cargoRow.avg_cost) * quantity;
       if (profit > 0) prestigeGained += profit / PRESTIGE.PROFIT_PER_POINT;
+      // Profit net porté au crédit du vaisseau (positif ou négatif) : c'est
+      // lui qui dit, plus tard, quel vaisseau tire vraiment son poids.
+      db.prepare('UPDATE ships SET lifetime_profit = ROUND(lifetime_profit + ?, 2) WHERE id = ?')
+        .run(profit, ship.id);
     }
 
     // Premier échange avec cette planète : un nouveau partenaire commercial.

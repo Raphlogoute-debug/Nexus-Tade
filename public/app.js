@@ -3026,6 +3026,26 @@ async function renderFleetPanel() {
       entretien ${fmtNum.format(p.fleetUpkeep)} cr/j</p>
   `;
 
+  // Santé de la flotte : ce qui réclame l'attention, et de quoi y répondre
+  // d'un clic — l'essentiel quand on pilote des dizaines de vaisseaux.
+  const lowFuel = ships.filter((s) => s.planet_id !== null && s.fuel / s.fuel_capacity < 0.25);
+  const needRefuel = ships.some((s) => s.planet_id !== null && s.fuel < s.fuel_capacity);
+  const grounded = (p.credits ?? 0) < 0;
+  const totalProfit = ships.reduce((a, s) => a + (s.lifetime_profit ?? 0), 0);
+  const chips = [];
+  if (grounded) chips.push(`<span class="fh-chip bad">⛔ flotte clouée (découvert)</span>`);
+  if (freeCount > 0) chips.push(`<span class="fh-chip warn">⚠ ${freeCount} disponible${freeCount > 1 ? 's' : ''}</span>`);
+  if (lowFuel.length > 0) chips.push(`<span class="fh-chip warn">⛽ ${lowFuel.length} carburant bas</span>`);
+  if (chips.length === 0) chips.push(`<span class="fh-chip ok">✓ toute la flotte au travail</span>`);
+  html += `<div class="fleet-health">
+    <div class="fleet-chips">${chips.join('')}</div>
+    <div class="fleet-bulk">
+      ${freeCount > 0 ? `<button class="action-btn mini" id="bulk-auto" title="Met tous les vaisseaux disponibles en mode automatique (sauf celui que vous pilotez)">⚡ disponibles → auto</button>` : ''}
+      ${needRefuel ? `<button class="action-btn mini" id="bulk-refuel" title="Ravitaille tous les vaisseaux à quai">⛽ ravitailler la flotte</button>` : ''}
+    </div>
+    <div class="fleet-profit">Profit net cumulé de la flotte : <strong class="${totalProfit >= 0 ? 'price-low' : 'price-high'}">${totalProfit >= 0 ? '+' : ''}${fmtQty(Math.round(totalProfit))} cr</strong></div>
+  </div>`;
+
   html += `<div class="section-label">Vaisseaux (${ships.length})</div>`;
   for (const ship of ships) {
     const where = shipWhereabouts(ship);
@@ -3037,13 +3057,18 @@ async function renderFleetPanel() {
           : where.free ? '<span class="badge">disponible</span>' : '<span class="badge">MAN</span>';
     const isPiloted = ship.id === selectedShip()?.id;
     const topCargo = (ship.cargo ?? [])[0];
+    const idleShip = ship.mode === 'manual' && ship.planet_id !== null;
+    const lowFuelShip = ship.planet_id !== null && ship.fuel / ship.fuel_capacity < 0.25;
+    const attn = idleShip || lowFuelShip ? ' needs-attention' : '';
+    const prof = ship.lifetime_profit ?? 0;
 
-    html += `<div class="info-block ship-card ${isPiloted ? 'piloted' : ''}">
+    html += `<div class="info-block ship-card ${isPiloted ? 'piloted' : ''}${attn}">
       <div class="row"><span><strong>${ship.false_flag ? '⚑ ' : ''}${ship.name}</strong>
         <span style="color:var(--dim)">· ${ship.classLabel}</span> ${modeBadge}</span>
         <span>${isPiloted ? '<span class="badge live">PILOTÉ</span>'
           : `<button class="action-btn mini pilot-btn" data-ship="${ship.id}">piloter</button>`}</span></div>
-      <div class="row"><span>${where.label}</span><span></span></div>
+      <div class="row"><span>${where.label}</span>
+        <span title="Profit net réalisé par ce vaisseau depuis sa mise en service" class="${prof >= 0 ? 'price-low' : 'price-high'}">${prof >= 0 ? '+' : ''}${fmtQty(Math.round(prof))} cr</span></div>
       <div class="row"><span>Soute ${fmtQty(ship.cargoUsed)}/${fmtQty(ship.cargo_capacity)}${
         topCargo ? ` <span style="color:var(--dim)">(${topCargo.name}…)</span>` : ''}</span>
         <span>⛽ ${fuelPct} %</span></div>
@@ -3085,7 +3110,9 @@ async function renderFleetPanel() {
     html += `<div class="industry">${r.name}
       <span class="io">— ${r.ships.map((s) => s.name).join(', ') || 'aucun vaisseau'} ·
       ${r.stops.length} étapes</span>
-      <span class="price-low">+${fmtQty(Math.round(r.earned ?? 0))} cr</span></div>`;
+      <span class="price-low">+${fmtQty(Math.round(r.earned ?? 0))} cr</span>
+      <button class="action-btn mini clone-route" data-route="${r.id}"
+        title="Dupliquer cette route (mêmes étapes) pour l'assigner à un autre vaisseau">⧉ cloner</button></div>`;
   }
 
   // Contrats clients signés.
@@ -3109,6 +3136,27 @@ async function renderFleetPanel() {
     if (state.selectedSystem) renderSystemPanel(state.selectedSystem);
     else panel.innerHTML = '<p class="hint">Cliquez sur un système de la carte.</p>';
   });
+  $('#bulk-auto')?.addEventListener('click', async () => {
+    const r = await apiPost('/fleet/auto-idle', { exceptShipId: selectedShip()?.id ?? 0 });
+    if (r.ok) { toast(`${r.count} vaisseau${r.count > 1 ? 'x' : ''} mis en automatique`, 'good'); log(`${r.count} vaisseau(x) disponible(s) remis au travail (auto)`); }
+    await refreshPlayerAndKnowledge();
+    renderFleetPanel();
+  });
+  $('#bulk-refuel')?.addEventListener('click', async () => {
+    const r = await apiPost('/fleet/refuel');
+    if (r.ok) { toast(r.count ? `${r.count} vaisseau${r.count > 1 ? 'x' : ''} ravitaillé${r.count > 1 ? 's' : ''} (−${fmtQty(r.total)} cr)` : 'Rien à ravitailler', r.count ? 'good' : 'info'); if (r.count) log(`Flotte ravitaillée : ${r.count} vaisseau(x) (−${fmtQty(r.total)} cr)`); }
+    await refreshPlayerAndKnowledge();
+    renderFleetPanel();
+  });
+  for (const btn of panel.querySelectorAll('.clone-route')) {
+    btn.addEventListener('click', async () => {
+      const r = await apiPost(`/routes/${btn.dataset.route}/clone`);
+      if (r.ok) { toast(`Route clonée : « ${r.name} »`, 'good'); log(`Route dupliquée : « ${r.name} » (${r.stops} étapes) — assignez-lui un vaisseau`); }
+      else log(`Clonage impossible : ${r.error}`);
+      await refreshPlayerAndKnowledge();
+      renderFleetPanel();
+    });
+  }
   for (const btn of panel.querySelectorAll('.pilot-btn')) {
     btn.addEventListener('click', () => {
       state.selectedShipId = Number(btn.dataset.ship);

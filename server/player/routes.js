@@ -71,6 +71,18 @@ export function listRoutes(db) {
   }));
 }
 
+// Cloner une route : on réplique ses étapes sous un nouveau nom. Pratique
+// pour démultiplier une boucle rentable sur d'autres vaisseaux sans tout
+// reconfigurer à la main.
+export function cloneRoute(db, routeId) {
+  const route = db.prepare('SELECT * FROM routes WHERE id = ?').get(routeId);
+  if (!route) return { ok: false, error: 'route inconnue' };
+  const stops = db.prepare(
+    'SELECT planet_id, actions FROM route_stops WHERE route_id = ? ORDER BY position'
+  ).all(routeId).map((s) => ({ planetId: s.planet_id, actions: JSON.parse(s.actions) }));
+  return createRoute(db, `${route.name} (copie)`, stops);
+}
+
 export function deleteRoute(db, routeId) {
   if (!db.prepare('SELECT 1 FROM routes WHERE id = ?').get(routeId)) {
     return { ok: false, error: 'route inconnue' };

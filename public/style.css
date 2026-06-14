@@ -483,6 +483,29 @@ main { flex: 1; display: flex; min-height: 0; }
 /* Tableau de bord de la flotte : cartes de vaisseaux. */
 .ship-card.piloted { border-color: var(--accent); }
 .ship-card .gauge { margin-bottom: 4px; }
+/* Vaisseau oisif ou à sec : liseré ambré pour le repérer dans une longue liste. */
+.ship-card.needs-attention { border-left: 3px solid var(--amber); }
+
+/* Santé de la flotte : bandeau résumé + actions en masse. */
+.fleet-health {
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.fleet-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fh-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.fh-chip.ok { color: var(--green); border-color: rgba(95, 214, 139, 0.4); }
+.fh-chip.warn { color: var(--amber); border-color: rgba(232, 179, 90, 0.4); }
+.fh-chip.bad { color: var(--red); border-color: rgba(240, 105, 105, 0.5); }
+.fleet-bulk { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.fleet-profit { margin-top: 8px; font-size: 11px; color: var(--dim); }
 
 /* ── Voyage : risque pirate et escorte ─────────────────────── */
 
