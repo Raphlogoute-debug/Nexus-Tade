@@ -45,7 +45,18 @@
 }
 #title-screen.fade { opacity: 0; pointer-events: none; }
 
+/* Fond vivant : starfield animé en canvas, derrière le titre. */
+#title-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .title-inner {
+  position: relative;
+  z-index: 1;
   text-align: center;
   animation: titleRise 1s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -64,6 +75,11 @@
 .title-logo span {
   color: var(--accent);
   text-shadow: 0 0 40px rgba(92, 205, 245, 0.55);
+  animation: logoGlow 4.5s ease-in-out infinite;
+}
+@keyframes logoGlow {
+  0%, 100% { text-shadow: 0 0 32px rgba(92, 205, 245, 0.40); }
+  50% { text-shadow: 0 0 52px rgba(92, 205, 245, 0.75); }
 }
 .title-tagline {
   color: var(--dim);

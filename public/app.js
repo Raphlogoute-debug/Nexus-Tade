@@ -4624,8 +4624,119 @@ async function init() {
 // Affiché à chaque nouvel onglet ; « Continuer » se fond dans la partie
 // en cours, « Nouvelle partie » ouvre le menu. Une fois entré, on n'y
 // revient pas (les rechargements liés au changement de partie le sautent).
+// Fond vivant de l'écran-titre : starfield en parallaxe qui dérive, halos
+// de nébuleuses, et de loin en loin une comète qui file. Tourne seulement
+// tant que le titre est affiché (coupé à l'entrée pour ne rien gâcher).
+let titleAnim = null;
+function startTitleBackdrop() {
+  const cv = $('#title-bg');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let W = 0, H = 0;
+  const resize = () => {
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  resize();
+  window.addEventListener('resize', resize);
+
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  // Trois couches de profondeur (lointain → proche) à vitesses croissantes.
+  const layers = [
+    { n: 90, sp: 3, r: [0.4, 0.9], a: [0.18, 0.4] },
+    { n: 60, sp: 7, r: [0.6, 1.3], a: [0.3, 0.6] },
+    { n: 28, sp: 14, r: [0.9, 1.8], a: [0.5, 0.95] },
+  ].map((L) => ({
+    sp: L.sp,
+    stars: Array.from({ length: L.n }, () => ({
+      x: Math.random(), y: Math.random(), r: rnd(...L.r),
+      a: rnd(...L.a), tw: rnd(0, Math.PI * 2), ts: rnd(0.5, 1.6),
+    })),
+  }));
+  const nebulae = [
+    { x: 0.30, y: 0.40, r: 360, c: '92,205,245', a: 0.10 },
+    { x: 0.70, y: 0.62, r: 420, c: '150,120,230', a: 0.09 },
+    { x: 0.52, y: 0.28, r: 300, c: '86,196,196', a: 0.07 },
+  ];
+  let comet = null, nextComet = rnd(1.5, 4);
+
+  const t0 = performance.now();
+  let last = t0;
+  const draw = (now) => {
+    const t = (now - t0) / 1000;
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    ctx.clearRect(0, 0, W, H);
+
+    // Nébuleuses qui respirent et dérivent très lentement.
+    for (const nb of nebulae) {
+      const cx = (nb.x + Math.sin(t * 0.05 + nb.y * 7) * 0.015) * W;
+      const cy = (nb.y + Math.cos(t * 0.04 + nb.x * 7) * 0.015) * H;
+      const pulse = 1 + Math.sin(t * 0.3 + nb.x * 10) * 0.06;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, nb.r * pulse);
+      g.addColorStop(0, `rgba(${nb.c},${nb.a})`);
+      g.addColorStop(1, `rgba(${nb.c},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Étoiles : dérive diagonale + scintillement.
+    for (const L of layers) {
+      for (const st of L.stars) {
+        const x = (st.x * W + (t * L.sp)) % (W + 4) - 2;
+        const y = (st.y * H + (t * L.sp * 0.35)) % (H + 4) - 2;
+        const tw = 0.65 + 0.35 * Math.sin(st.tw + t * st.ts);
+        ctx.globalAlpha = st.a * tw;
+        ctx.fillStyle = '#dfeafc';
+        ctx.beginPath();
+        ctx.arc(x, y, st.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Comète occasionnelle : un trait lumineux qui traverse.
+    nextComet -= dt;
+    if (!comet && nextComet <= 0) {
+      const fromLeft = Math.random() < 0.5;
+      comet = {
+        x: fromLeft ? -0.05 * W : 1.05 * W, y: rnd(0.1, 0.55) * H,
+        vx: (fromLeft ? 1 : -1) * rnd(420, 620), vy: rnd(120, 200), life: 0,
+      };
+      nextComet = rnd(4, 8);
+    }
+    if (comet) {
+      comet.life += dt;
+      comet.x += comet.vx * dt; comet.y += comet.vy * dt;
+      const len = 90;
+      const tx = comet.x - comet.vx * 0.13, ty = comet.y - comet.vy * 0.13;
+      const g = ctx.createLinearGradient(tx, ty, comet.x, comet.y);
+      g.addColorStop(0, 'rgba(150,210,255,0)');
+      g.addColorStop(1, 'rgba(200,235,255,0.9)');
+      ctx.strokeStyle = g; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(comet.x, comet.y); ctx.stroke();
+      ctx.globalAlpha = 0.9; ctx.fillStyle = '#eaf6ff';
+      ctx.beginPath(); ctx.arc(comet.x, comet.y, 1.7, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      if (comet.x < -0.1 * W || comet.x > 1.1 * W || comet.y > 1.1 * H) comet = null;
+      void len;
+    }
+
+    titleAnim = requestAnimationFrame(draw);
+  };
+  titleAnim = requestAnimationFrame(draw);
+  startTitleBackdrop.cleanup = () => window.removeEventListener('resize', resize);
+}
+
+function stopTitleBackdrop() {
+  if (titleAnim) { cancelAnimationFrame(titleAnim); titleAnim = null; }
+  startTitleBackdrop.cleanup?.();
+}
+
 function dismissTitle() {
   try { sessionStorage.setItem('nx-entered', '1'); } catch { /* privé */ }
+  stopTitleBackdrop();
   const t = $('#title-screen');
   t.classList.add('fade');
   setTimeout(() => { t.hidden = true; }, 750);
@@ -4636,6 +4747,7 @@ function setupTitle() {
     try { return sessionStorage.getItem('nx-entered') === '1'; } catch { return false; }
   })();
   if (entered) { $('#title-screen').hidden = true; return; }
+  startTitleBackdrop();
   $('#title-continue').addEventListener('click', dismissTitle);
   $('#title-new').addEventListener('click', () => { dismissTitle(); openSavesOverlay(); });
 }
